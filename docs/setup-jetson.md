@@ -34,3 +34,23 @@ extlinux.conf: FDT Zeile hinzugefügt
 ## Bekannte Einschränkungen
 - GTSAM kompiliert nicht (GCC7/8 ARM64 Bug) → LIO-SAM ausstehend
 - Fan PWM bindet nicht sauber → extern kühlen
+
+## IMU Extrinsik-Kalibrierung (SBG ↔ Ouster)
+
+Gemessen 2026-06-23, Scanner statisch auf flacher Fläche (aufrecht + auf dem Kopf):
+
+| Achse | Offset |
+|-------|--------|
+| Roll  | ~5.0°  |
+| Pitch | ~4.2°  |
+| Yaw   | unbekannt (Gravity allein nicht bestimmbar) |
+
+Für LIO-SAM `params.yaml`:
+```yaml
+extrinsicRot:  [1, 0, 0,  0, 1, 0,  0, 0, 1]   # TODO: exakte Matrix einsetzen
+extrinsicRPY:  [0.087, 0.073, 0.0]               # roll=5deg, pitch=4.2deg, yaw=TBD
+```
+
+SBG Ellipse 2 Funktionsnachweis:
+- Aufrecht: roll=+0.96°, pitch=+0.09° (flache Fläche → korrekt)
+- Auf dem Kopf: roll=-179.67°, pitch=-0.18° (korrekt)
