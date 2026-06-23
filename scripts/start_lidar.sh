@@ -32,8 +32,8 @@ sleep 10
 
 # 5. SBG IMU (optional)
 if [ -e /dev/ttyUSB0 ]; then
-    echo "[IMU] Starte sbg_driver..."
-    nohup roslaunch sbg_driver sbg_device.launch > $LOG_DIR/sbg.log 2>&1 &
+    echo "[IMU] Starte sbg_reader (direkt seriell)..."
+    nohup python3 /home/nvidia/sbg_reader.py > $LOG_DIR/sbg.log 2>&1 &
     sleep 3
 fi
 

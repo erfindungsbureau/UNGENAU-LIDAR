@@ -107,7 +107,14 @@ def api_points():
 
 @app.route("/api/imu")
 def api_imu():
-    return jsonify({"roll": 0, "pitch": 0, "yaw": 0})
+    try:
+        with open("/tmp/imu.json") as f:
+            data = f.read()
+        resp = Response(data, mimetype="application/json")
+        resp.headers["Cache-Control"] = "no-cache, no-store"
+        return resp
+    except Exception:
+        return jsonify({"roll": 0, "pitch": 0, "yaw": 0})
 
 
 @app.route("/api/record/start", methods=["POST"])
