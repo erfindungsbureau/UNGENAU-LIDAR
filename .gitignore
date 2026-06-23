@@ -1,0 +1,7 @@
+*.bag
+*.pyc
+__pycache__/
+webui/static/three.min.js
+webui/static/roslib.min.js
+*.log
+/tmp/

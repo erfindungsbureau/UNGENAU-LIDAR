@@ -1,133 +1,60 @@
-# Jetson TX2 — Handheld LiDAR Scanner
+# UNGENAU LiDAR Scanner
 
-A self-contained handheld LiDAR scanner based on the NVIDIA Jetson TX2, featuring real-time SLAM (LIO-SAM), a smartphone web interface, and automatic WiFi fallback.
+Handgehaltener 3D-Scanner auf Basis NVIDIA Jetson TX2 mit Ouster OS1-64 LiDAR.
+Live-Vorschau und Scan-Aufnahme über Smartphone-Browser.
 
 ## Hardware
+- NVIDIA Jetson TX2 (Auvidea J120)
+- Ouster OS1-64 LiDAR (Firmware v2.4.0)
+- SBG Ellipse 2 IMU (RS-422 / FTDI USB)
+- 460GB NVMe SSD (Scandaten)
 
-| Component | Details |
-|-----------|---------|
-| **Compute** | NVIDIA Jetson TX2 (Ubuntu 16.04, JetPack R28.2.1, aarch64) |
-| **LiDAR** | Ouster OS-1 (64-channel) — connected via `eth0` (192.168.0.x) |
-| **IMU/GPS** | SBG Ellipse2 E-G4A3-M1 — connected via USB/RS-232 |
-| **Storage** | NVMe SSD 460GB mounted at `/media/nvidia/SSD1` |
-| **WiFi** | `wlan0` — client mode (StudioFiume) or AP mode (LidarScanner) |
+## System
+- JetPack 4.6 / Ubuntu 18.04 / L4T R32.6.1
+- ROS Melodic (apt, nicht Conda)
+- Hostname: lidar / lidar.local
+- Web Interface: http://192.168.31.39:5000
+- SMB Share: smb://192.168.31.39/lidar_data
 
-## Architecture
-
-```
-[Smartphone] ──WiFi──► [Jetson TX2 Hotspot 10.42.0.1]
-                               │
-                      ┌────────┴────────┐
-                      │  Flask App :5000 │  ← Start/Stop/Status/Preview
-                      └────────┬────────┘
-                               │
-                      ┌────────┴────────────────────┐
-                      │  ROS Noetic (RoboStack/conda) │
-                      │  ├── ouster_ros               │
-                      │  ├── sbg_ros_driver           │
-                      │  └── LIO-SAM                  │
-                      └─┬──────────┬────────────────-─┘
-                        │          │
-                    eth0:       USB/RS-232:
-                Ouster OS-1    SBG Ellipse2
-
-Bags + Maps → /media/nvidia/SSD1/lidar_data/
-SMB Share   → \\10.42.0.1\lidar_data
+## Starten
+```bash
+~/start_lidar.sh
 ```
 
-## Features
+## WiFi
+- Bekanntes Netz (StudioFiume): verbindet als Client → http://192.168.31.39:5000
+- Kein bekanntes Netz: erstellt Hotspot **LidarScanner** → http://10.42.0.1:5000
+- Passwort Hotspot: `lidar1234`
 
-- **Web Interface** (`:5000`) — Start/stop recording, live status, bag file list with download
-- **ROS Noetic** via RoboStack (conda) — runs on Ubuntu 16.04 without Docker
-- **LIO-SAM SLAM** — tightly-coupled LiDAR-IMU odometry and mapping
-- **WiFi Fallback** — connects to StudioFiume when available, creates `LidarScanner` hotspot otherwise
-- **SMB Share** — scan data directly accessible from any PC/Mac at `\\10.42.0.1\lidar_data`
-- **Autostart** — all services start on boot via systemd
+## SMB Dateitransfer
+- Mac/Windows: smb://192.168.31.39/lidar_data
+- User: nvidia / Pass: nvidia
+- Ordner: bags/ (Rohdaten), maps/ (SLAM), exports/ (E57/ArchiCAD)
 
-## Quick Start
-
-1. Power on Jetson TX2
-2. Connect smartphone to WiFi `LidarScanner` (password: `lidar2024`) — or stay on StudioFiume
-3. Open browser: `http://10.42.0.1:5000` (hotspot) or `http://192.168.31.39:5000` (LAN)
-4. Press **"ROS starten"** → wait ~5s
-5. Press **"▶ Start"** to begin recording
-6. Press **"■ Stop"** when done
-7. Download `.bag` file from the list, or access via SMB: `smb://10.42.0.1/lidar_data`
-
-## Repository Structure
-
+## Struktur
 ```
-jetson-lidar-scanner/
-├── README.md                    — This file
-├── docs/
-│   ├── setup-jetson.md          — Full Jetson TX2 setup guide
-│   ├── setup-ros.md             — ROS Noetic / RoboStack build guide
-│   └── hardware-connections.md  — Wiring and IP configuration
-├── webui/
-│   ├── app.py                   — Flask web application (Python 3.5 compatible)
-│   └── templates/
-│       └── index.html           — Mobile-optimized web UI
-├── config/
-│   ├── smb.conf                 — Samba share configuration
-│   ├── wifi-fallback.sh         — WiFi client/hotspot fallback script
-│   ├── lidar-hotspot.service    — systemd service for WiFi management
-│   ├── lidar-hotspot.timer      — systemd timer (runs every 5 min)
-│   └── lidar-webui.service      — systemd service for Flask app
-└── scripts/
-    ├── install-robostack.sh     — RoboStack (ROS Noetic via conda) installer
-    └── deploy.sh                — Deploy all configs to Jetson via SSH
+scripts/
+  start_lidar.sh    Alles starten
+  wifi_ap.sh        WiFi / Hotspot Logik
+  bridge.py         ROS→Flask Brücke (Python2, downsampled points)
+webui/
+  app.py            Flask Backend (Recording, Status, Bags)
+  templates/        HTML Frontend (Three.js 3D Viewer)
+  static/           JS Libraries (lokal, offline-fähig)
+config/
+  smb.conf          Samba Konfiguration
+docs/
+  setup-jetson.md   Jetson Setup (JetPack 4.6)
+  setup-ros.md      ROS Melodic Installation
+  hardware-connections.md  Verkabelung
 ```
 
-## Installed Services (Jetson TX2)
-
-| Service | Status | Description |
-|---------|--------|-------------|
-| `lidar-webui.service` | enabled, auto-start | Flask web interface on :5000 |
-| `lidar-hotspot.timer` | enabled, every 5min | WiFi client/hotspot fallback |
-| `smbd` / `nmbd` | enabled, auto-start | Samba share for scan data |
-| LightDM | **disabled** | Saves ~400MB RAM |
-
-## Data Storage
-
-All scan data is stored on the NVMe SSD:
-
-```
-/media/nvidia/SSD1/
-├── lidar_data/
-│   ├── bags/     ← ROS bag recordings (scan_YYYYMMDD_HHMMSS.bag)
-│   └── maps/     ← LIO-SAM map output
-└── docker/       ← (reserved, unused — Docker blocked by custom kernel)
-```
-
-SSD is auto-mounted via `/etc/fstab`:
-```
-UUID=7fe9b4be-c632-4680-8135-cf717a970383  /media/nvidia/SSD1  ext4  defaults,nofail,x-systemd.device-timeout=5  0  2
-```
-
-## Known Limitations
-
-- **Docker not functional**: Custom kernel `4.4.38-jetsonbotv0.1` has `CONFIG_CGROUP_DEVICE=n` → Docker crashes on start. ROS Noetic is installed via RoboStack (conda) instead.
-- **Slow internet on Jetson**: WiFi connection is ~7KB/s. RoboStack packages were downloaded on rosbot (fast internet) and synced via LAN rsync.
-- **Python 3.5**: Ubuntu 16.04 ships Python 3.5 — Flask app avoids f-strings and Python 3.6+ features.
-- **LiDAR preview**: The `/api/snapshot` endpoint shows a placeholder grid (ROS offline indicator). Full point cloud visualization requires a running ROS stack.
-
-## Network
-
-| Mode | IP | Access |
-|------|----|--------|
-| LAN (StudioFiume) | `192.168.31.39` | `http://192.168.31.39:5000` |
-| Hotspot (field use) | `10.42.0.1` | `http://10.42.0.1:5000` |
-| WiFi SSID | `LidarScanner` | Password: `lidar2024` |
-| SMB (LAN) | `\\192.168.31.39\lidar_data` | Guest access |
-| SMB (hotspot) | `\\10.42.0.1\lidar_data` | Guest access |
-
-## rosbot (Intel NUC i7-7500U)
-
-The `rosbot` machine at `192.168.31.238` serves as:
-- Development workstation for this project
-- Conda package mirror (downloaded RoboStack aarch64 packages for the Jetson)
-- SSH access point for Jetson management
-
----
-
-*Studio Fiume, Hardturmstrasse 132a, 8005 Zürich*
+## API Endpoints
+| Endpoint | Methode | Beschreibung |
+|---|---|---|
+| /api/status | GET | ROS, LiDAR, IMU, Disk Status |
+| /api/points | GET | Live Punktwolke (downsampled JSON) |
+| /api/record/start | POST | Rosbag Recording starten |
+| /api/record/stop | POST | Recording stoppen |
+| /api/bags | GET | Gespeicherte Bags auflisten |
+| /api/download/<name> | GET | Bag herunterladen |

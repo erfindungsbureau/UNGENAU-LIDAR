@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>LiDAR Live</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+#canvas { display: block; position: fixed; top: 0; left: 0; }
+#info {
+  position: fixed; top: 10px; right: 10px;
+  background: rgba(0,0,0,0.85); padding: 15px;
+  border: 1px solid #0f0; color: #0f0;
+  font-family: monospace; font-size: 13px;
+  min-width: 200px;
+}
+.ok { color: #0f0; } .warn { color: #f80; } .err { color: #f00; }
+h2 { font-size: 14px; margin-bottom: 10px; color: #4fc3f7; border-bottom: 1px solid #333; padding-bottom: 5px; }
+.row { display: flex; justify-content: space-between; margin: 4px 0; }
+.val { color: #4fc3f7; font-weight: bold; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="info">
+  <h2>LiDAR Live</h2>
+  <div class="row">ROS: <span id="ros_status" class="warn">connecting...</span></div>
+  <div class="row">Points: <span id="pts" class="val">0</span></div>
+  <div class="row">Rate: <span id="rate" class="val">0 Hz</span></div>
+  <hr style="border-color: #333; margin: 8px 0;">
+  <div class="row">Roll: <span id="roll" class="val">0°</span></div>
+  <div class="row">Pitch: <span id="pitch" class="val">0°</span></div>
+  <div class="row">Yaw: <span id="yaw" class="val">0°</span></div>
+  <hr style="border-color: #333; margin: 8px 0;">
+  <div style="font-size: 11px; color: #666;">
+    Drag: rotate<br>
+    Scroll: zoom
+  </div>
+</div>
+
+<script src="/static/three.min.js"></script>
+<script src="/static/roslib.min.js"></script>
+<script>
+const canvas = document.getElementById("canvas");
+
+// Three.js
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 10000);
+camera.position.set(0, 10, 30);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+// Grid + Axes
+scene.add(new THREE.GridHelper(100, 100, 0x333333, 0x111111));
+scene.add(new THREE.AxesHelper(5));
+scene.add(new THREE.AmbientLight(0x404040));
+
+// Point cloud
+let ptGeom = new THREE.BufferGeometry();
+let ptMat = new THREE.PointsMaterial({ color: 0x00ff88, size: 0.08, sizeAttenuation: true });
+let ptCloud = new THREE.Points(ptGeom, ptMat);
+scene.add(ptCloud);
+
+// Mouse controls
+let isDragging = false, prevMouse = {x:0,y:0};
+canvas.addEventListener("mousedown", e => { isDragging=true; prevMouse={x:e.clientX,y:e.clientY}; });
+canvas.addEventListener("mouseup", () => isDragging=false);
+canvas.addEventListener("mousemove", e => {
+  if (!isDragging) return;
+  const dx = e.clientX - prevMouse.x, dy = e.clientY - prevMouse.y;
+  const q = new THREE.Quaternion();
+  q.setFromAxisAngle(new THREE.Vector3(0,1,0), dx*0.01);
+  camera.position.applyQuaternion(q);
+  const right = new THREE.Vector3();
+  camera.getWorldDirection(right); right.cross(camera.up).normalize();
+  q.setFromAxisAngle(right, dy*0.01);
+  camera.position.applyQuaternion(q);
+  camera.lookAt(0,0,0);
+  prevMouse = {x:e.clientX, y:e.clientY};
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  camera.position.multiplyScalar(e.deltaY > 0 ? 1.1 : 0.9);
+}, {passive: false});
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ROS
+const ros = new ROSLIB.Ros({ url: "ws://" + location.hostname + ":9090" });
+ros.on("connection", () => {
+  document.getElementById("ros_status").textContent = "connected";
+  document.getElementById("ros_status").className = "ok";
+  subscribeTopics();
+});
+ros.on("error", e => {
+  document.getElementById("ros_status").textContent = "error";
+  document.getElementById("ros_status").className = "err";
+});
+ros.on("close", () => {
+  document.getElementById("ros_status").textContent = "disconnected";
+  document.getElementById("ros_status").className = "warn";
+});
+
+let frameCount = 0, lastFpsTime = Date.now();
+
+function subscribeTopics() {
+  // Subscribe to IMU only via rosbridge (lightweight)
+  // Point cloud comes via Flask API (pre-processed, fast)
+
+  // Subscribe to IMU
+  const imuTopic = new ROSLIB.Topic({
+    ros: ros,
+    name: "/sbg/ekf_euler",
+    messageType: "sbg_driver/SbgEkfEuler"
+  });
+  imuTopic.subscribe(msg => {
+    document.getElementById("roll").textContent = (msg.angle.x * 180/Math.PI).toFixed(1) + "°";
+    document.getElementById("pitch").textContent = (msg.angle.y * 180/Math.PI).toFixed(1) + "°";
+    document.getElementById("yaw").textContent = (msg.angle.z * 180/Math.PI).toFixed(1) + "°";
+  });
+}
+
+// Fetch points from Flask API (fast, pre-processed)
+async function fetchPoints() {
+  try {
+    const res = await fetch("/api/points");
+    const pts = await res.json();
+    if (pts && pts.length > 0) {
+      const pos = new Float32Array(pts.length * 3);
+      for (let i = 0; i < pts.length; i++) {
+        pos[i*3]   = pts[i][0];      // x
+        pos[i*3+1] = pts[i][2];      // z -> y
+        pos[i*3+2] = -pts[i][1];     // -y -> z
+      }
+      ptGeom.dispose();
+      ptGeom = new THREE.BufferGeometry();
+      ptGeom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      ptCloud.geometry = ptGeom;
+      document.getElementById("pts").textContent = pts.length;
+      frameCount++;
+      const now = Date.now();
+      if (now - lastFpsTime > 1000) {
+        document.getElementById("rate").textContent = frameCount + " Hz";
+        frameCount = 0;
+        lastFpsTime = now;
+      }
+    }
+  } catch(e) {
+    console.error("fetch points:", e);
+  }
+  setTimeout(fetchPoints, 200);
+}
+fetchPoints();
+
+// Animate
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
