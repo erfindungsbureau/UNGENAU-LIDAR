@@ -84,3 +84,46 @@ extrinsicRPY:   [0.0873, 0.0733, 0.0000]
 **Hinweis Y-Vorzeichen:** Der Ouster OS1 hat Z nach oben (Rotationsachse), X vorwärts (weg vom Stecker).
 Y zeigt nach links (Rechte-Hand-Regel). "Rechts von der Steckerseite" = **-Y im LiDAR-Frame** → ggf. -0.030 verwenden.
 Im ersten SLAM-Test prüfen ob die Trajektorie plausibel ist; falls gespiegelt, Y-Vorzeichen umkehren.
+
+---
+
+## Web Frontend aktualisieren
+
+Flask (debug=False) cached Jinja2-Templates. Nach Änderungen an HTML/CSS/JS in
+`/home/nvidia/lidar_viewer/templates/` **muss Flask neu gestartet werden** — ein
+Browser-Refresh allein reicht nicht.
+
+### Vorgehen bei Frontend-Änderungen
+
+```bash
+# 1. Flask neu starten
+pkill -f app.py
+nohup python3 /home/nvidia/lidar_viewer/app.py > /tmp/flask.log 2>&1 &
+
+# 2. Sicherstellen dass die neue Version serviert wird
+sleep 2
+curl -s http://localhost:5000/ | grep -o "gesuchter-string"
+
+# 3. Browser hart neu laden
+# Mac:  Cmd + Shift + R
+# iOS:  URL neu eintippen oder langen Tap auf Reload-Button
+```
+
+> **Faustregel:** Template-Änderung → Flask restart → Browser refresh.
+> Beide Schritte sind nötig, beide sehen nach dem gleichen Symptom aus wenn sie fehlen.
+
+### LIO-SAM über Web Frontend starten
+
+1. `⬡ SLAM` Button in der Toolbar drücken → startet `roslaunch lio_sam run.launch`
+2. Status-Box zeigt **SLAM: aktiv** wenn alle 4 Nodes laufen (~5 Sek.)
+3. `SCAN` drücken → rosbag-Aufnahme parallel zu SLAM
+4. `⬡ SLAM` nochmals drücken → sauberes Stoppen (SIGINT → PCD wird auf SSD gespeichert)
+
+PCD-Maps landen in `/media/nvidia/SSD/lidar_data/maps/`.
+
+### Jetson auf Full Performance schalten (vor SLAM-Lauf)
+
+```bash
+sudo nvpmodel -m 0   # Alle 6 CPU-Kerne aktivieren (Max-N Modus)
+sudo jetson_clocks   # CPU/GPU Takt auf Maximum fixieren
+```
