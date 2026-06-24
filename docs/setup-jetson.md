@@ -54,3 +54,33 @@ extrinsicRPY:  [0.087, 0.073, 0.0]               # roll=5deg, pitch=4.2deg, yaw=
 SBG Ellipse 2 Funktionsnachweis:
 - Aufrecht: roll=+0.96°, pitch=+0.09° (flache Fläche → korrekt)
 - Auf dem Kopf: roll=-179.67°, pitch=-0.18° (korrekt)
+
+## Vollständige Extrinsik-Kalibrierung SBG ↔ Ouster OS1-64
+
+### Translation (physisch gemessen, 2026-06-24)
+| Achse | Wert | Beschreibung |
+|-------|------|--------------|
+| X | 0.000 m | SBG auf Achse des LiDARs |
+| Y | ±0.030 m | 30mm rechts von Steckerseite — **Vorzeichen je nach Ouster-Frame prüfen** |
+| Z | -0.0249 m | SBG-Referenzpunkt 24.9mm unter LiDAR-Grundplatte |
+
+### Rotation (gemessen via Gravity-Vergleich, 2026-06-23)
+| Achse | Wert |
+|-------|------|
+| Roll  | 5.0° = 0.0873 rad |
+| Pitch | 4.2° = 0.0733 rad |
+| Yaw   | unbekannt (0° angenommen) |
+
+### LIO-SAM params.yaml
+```yaml
+# Extrinsics: T_lb (lidar -> imu/SBG)
+extrinsicTrans: [0.000, 0.030, -0.0249]
+extrinsicRot:   [0.9973, 0.0064, 0.0730,
+                  0.0000, 0.9962, -0.0872,
+                 -0.0732, 0.0869, 0.9935]
+extrinsicRPY:   [0.0873, 0.0733, 0.0000]
+```
+
+**Hinweis Y-Vorzeichen:** Der Ouster OS1 hat Z nach oben (Rotationsachse), X vorwärts (weg vom Stecker).
+Y zeigt nach links (Rechte-Hand-Regel). "Rechts von der Steckerseite" = **-Y im LiDAR-Frame** → ggf. -0.030 verwenden.
+Im ersten SLAM-Test prüfen ob die Trajektorie plausibel ist; falls gespiegelt, Y-Vorzeichen umkehren.
