@@ -114,17 +114,16 @@ function subscribeTopics() {
   // Subscribe to IMU only via rosbridge (lightweight)
   // Point cloud comes via Flask API (pre-processed, fast)
 
-  // Subscribe to IMU
-  const imuTopic = new ROSLIB.Topic({
-    ros: ros,
-    name: "/sbg/ekf_euler",
-    messageType: "sbg_driver/SbgEkfEuler"
-  });
-  imuTopic.subscribe(msg => {
-    document.getElementById("roll").textContent = (msg.angle.x * 180/Math.PI).toFixed(1) + "°";
-    document.getElementById("pitch").textContent = (msg.angle.y * 180/Math.PI).toFixed(1) + "°";
-    document.getElementById("yaw").textContent = (msg.angle.z * 180/Math.PI).toFixed(1) + "°";
-  });
+  // IMU via Flask API (sbg_reader.py → /tmp/imu.json → /api/imu)
+  setInterval(async () => {
+    try {
+      const res = await fetch("/api/imu");
+      const d = await res.json();
+      document.getElementById("roll").textContent  = d.roll.toFixed(1)  + "°";
+      document.getElementById("pitch").textContent = d.pitch.toFixed(1) + "°";
+      document.getElementById("yaw").textContent   = d.yaw.toFixed(1)   + "°";
+    } catch(e) {}
+  }, 200);
 }
 
 // Fetch points from Flask API (fast, pre-processed)
