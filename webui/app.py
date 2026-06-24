@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 UNGENAU LiDAR Scanner - Web Interface
-Jetson TX2 / ROS Melodic / Ouster OS1-64
+Jetson TX2 / ROS Melodic / Ouster OS1-64 / SBG Ellipse 2
 """
-import os, subprocess, signal, glob, time, threading, json
+import os, re, subprocess, signal, glob, time, threading, json
 from datetime import datetime
-from flask import Flask, render_template, jsonify, send_file, Response
+from flask import Flask, render_template, jsonify, send_file, Response, request
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -15,9 +15,9 @@ MAPS_DIR  = os.path.join(DATA_DIR, "maps")
 ROS_SETUP = "/opt/ros/melodic/setup.bash"
 WS_SETUP  = "/home/nvidia/catkin_ws/devel/setup.bash"
 
-recording_process = None
+recording_process    = None
 recording_start_time = None
-recording_lock = threading.Lock()
+recording_lock       = threading.Lock()
 
 
 def ros_env():
@@ -27,17 +27,11 @@ def ros_env():
     return env
 
 
-def run_cmd(cmd, timeout=2):
+def is_lidar_publishing():
     try:
-        r = subprocess.run(cmd, env=ros_env(), timeout=timeout,
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return r.returncode == 0
+        return (time.time() - os.path.getmtime("/tmp/pts.json")) < 3.0
     except Exception:
         return False
-
-
-def is_ros_running():
-    return run_cmd(["rostopic", "list"], timeout=2)
 
 
 def is_recording():
@@ -50,9 +44,9 @@ def get_bags():
     for path in sorted(glob.glob(os.path.join(BAGS_DIR, "*.bag")), reverse=True):
         s = os.stat(path)
         bags.append({
-            "name": os.path.basename(path),
+            "name":    os.path.basename(path),
             "size_mb": round(s.st_size / 1024.0 / 1024.0, 1),
-            "mtime": datetime.fromtimestamp(s.st_mtime).strftime("%Y-%m-%d %H:%M"),
+            "mtime":   datetime.fromtimestamp(s.st_mtime).strftime("%Y-%m-%d %H:%M"),
         })
     return bags
 
@@ -68,6 +62,11 @@ def get_disk_info():
         return {"free_gb": 0, "total_gb": 0, "used_pct": 0}
 
 
+def sanitize_name(name):
+    name = re.sub(r'[^\w\- ]', '', name).strip().replace(' ', '_')
+    return name[:80] if name else None
+
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -77,19 +76,16 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    ros_ok = is_ros_running()
     rec = is_recording()
     duration = int(time.time() - recording_start_time) if rec and recording_start_time else None
-    lidar_ok = ros_ok and run_cmd(["rostopic", "hz", "/ouster/points", "--window=1"], timeout=1)
-    imu_ok   = ros_ok and run_cmd(["rostopic", "hz", "/ouster/imu", "--window=1"], timeout=1)
     return jsonify({
-        "ros": ros_ok,
-        "lidar": lidar_ok,
-        "imu": imu_ok,
-        "recording": rec,
+        "ros":        os.path.exists("/tmp/pts.json"),
+        "lidar":      is_lidar_publishing(),
+        "imu":        os.path.exists("/tmp/imu.json"),
+        "recording":  rec,
         "duration_s": duration,
-        "disk": get_disk_info(),
-        "time": datetime.now().strftime("%H:%M:%S"),
+        "disk":       get_disk_info(),
+        "time":       datetime.now().strftime("%H:%M:%S"),
     })
 
 
@@ -127,14 +123,19 @@ def api_record_start():
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         bag_path = os.path.join(BAGS_DIR, "scan_{}.bag".format(ts))
         try:
+            cmd = (
+                "source {ros} && source {ws} && "
+                "rosbag record -O {bag} "
+                "/ouster/points /ouster/imu /tf /tf_static"
+            ).format(ros=ROS_SETUP, ws=WS_SETUP, bag=bag_path)
             recording_process = subprocess.Popen(
-                ["bash", "-c",
-                 "source {} && source {} && rosbag record -O {} /ouster/points /ouster/imu /sbg/ekf_euler /tf /tf_static".format(
-                     ROS_SETUP, WS_SETUP, bag_path)],
+                ["bash", "-c", cmd],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             recording_start_time = time.time()
-            return jsonify({"ok": True, "msg": "Recording: {}".format(os.path.basename(bag_path)), "bag": os.path.basename(bag_path)})
+            bag_name = os.path.basename(bag_path)
+            return jsonify({"ok": True, "bag": bag_name,
+                            "msg": "Recording: {}".format(bag_name)})
         except Exception as e:
             return jsonify({"ok": False, "msg": str(e)})
 
@@ -150,7 +151,7 @@ def api_record_stop():
             recording_process.wait(timeout=10)
         except Exception:
             pass
-        recording_process = None
+        recording_process    = None
         recording_start_time = None
         return jsonify({"ok": True, "msg": "Gestoppt"})
 
@@ -160,11 +161,64 @@ def api_bags():
     return jsonify(get_bags())
 
 
+@app.route("/api/bags/<filename>", methods=["DELETE"])
+def api_delete_bag(filename):
+    if "/" in filename or not filename.endswith(".bag"):
+        return jsonify({"ok": False, "msg": "Ungültig"}), 400
+    path = os.path.join(BAGS_DIR, filename)
+    if not os.path.exists(path):
+        return jsonify({"ok": False, "msg": "Nicht gefunden"}), 404
+    os.remove(path)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/bags/<filename>/rename", methods=["POST"])
+def api_rename_bag(filename):
+    if "/" in filename or not filename.endswith(".bag"):
+        return jsonify({"ok": False, "msg": "Ungültig"}), 400
+    data     = request.get_json() or {}
+    new_name = sanitize_name(data.get("name", ""))
+    if not new_name:
+        return jsonify({"ok": False, "msg": "Kein Name"}), 400
+    if not new_name.endswith(".bag"):
+        new_name += ".bag"
+    src = os.path.join(BAGS_DIR, filename)
+    dst = os.path.join(BAGS_DIR, new_name)
+    if not os.path.exists(src):
+        return jsonify({"ok": False, "msg": "Nicht gefunden"}), 404
+    os.rename(src, dst)
+    return jsonify({"ok": True, "name": new_name})
+
+
+@app.route("/api/bags/<filename>/export", methods=["POST"])
+def api_export_bag(filename):
+    if "/" in filename or not filename.endswith(".bag"):
+        return jsonify({"ok": False, "msg": "Ungültig"}), 400
+    bag_path = os.path.join(BAGS_DIR, filename)
+    if not os.path.exists(bag_path):
+        return jsonify({"ok": False, "msg": "Nicht gefunden"}), 404
+    xyz_name = filename.replace(".bag", ".xyz")
+    xyz_path = os.path.join(BAGS_DIR, xyz_name)
+    cmd = (
+        "source {ros} && source {ws} && "
+        "python2 /home/nvidia/bag_to_xyz.py {bag} {xyz} 5"
+        " > /tmp/export.log 2>&1"
+    ).format(ros=ROS_SETUP, ws=WS_SETUP, bag=bag_path, xyz=xyz_path)
+    subprocess.Popen(["bash", "-c", cmd])
+    return jsonify({"ok": True, "file": xyz_name,
+                    "msg": "Export gestartet (log: /tmp/export.log)"})
+
+
 @app.route("/api/download/<filename>")
 def api_download(filename):
+    if "/" in filename:
+        return jsonify({"error": "Ungültig"}), 400
+    allowed_ext = (".bag", ".xyz", ".e57", ".pcd", ".las")
+    if not any(filename.endswith(e) for e in allowed_ext):
+        return jsonify({"error": "Nicht erlaubt"}), 403
     path = os.path.join(BAGS_DIR, filename)
-    if not os.path.exists(path) or not filename.endswith(".bag"):
-        return jsonify({"error": "Not found"}), 404
+    if not os.path.exists(path):
+        return jsonify({"error": "Nicht gefunden"}), 404
     return send_file(path, as_attachment=True)
 
 

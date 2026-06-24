@@ -1,169 +1,327 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>LiDAR Live</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-#canvas { display: block; position: fixed; top: 0; left: 0; }
-#info {
-  position: fixed; top: 10px; right: 10px;
-  background: rgba(0,0,0,0.85); padding: 15px;
-  border: 1px solid #0f0; color: #0f0;
-  font-family: monospace; font-size: 13px;
-  min-width: 200px;
-}
-.ok { color: #0f0; } .warn { color: #f80; } .err { color: #f00; }
-h2 { font-size: 14px; margin-bottom: 10px; color: #4fc3f7; border-bottom: 1px solid #333; padding-bottom: 5px; }
-.row { display: flex; justify-content: space-between; margin: 4px 0; }
-.val { color: #4fc3f7; font-weight: bold; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>LiDAR Scanner</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#e0e0e0;font-family:"Courier New",monospace}
+    #canvas{display:block;position:fixed;top:0;left:0;z-index:0}
+
+    #info{position:fixed;top:12px;right:12px;z-index:10;background:rgba(0,0,0,.9);border:1px solid #1e3a4a;padding:12px 14px;min-width:185px;border-radius:6px}
+    #info h2{font-size:13px;color:#4fc3f7;border-bottom:1px solid #1e3a4a;padding-bottom:6px;margin-bottom:8px}
+    .row{display:flex;justify-content:space-between;margin:3px 0;font-size:12px}
+    .val{color:#4fc3f7;font-weight:bold}
+    .ok{color:#4caf50}.warn{color:#ff9800}.err{color:#f44336}
+    hr.sep{border:none;border-top:1px solid #1e3a4a;margin:8px 0}
+    #scans-btn{width:100%;margin-top:10px;padding:7px;background:rgba(79,195,247,.1);border:1px solid #4fc3f7;color:#4fc3f7;cursor:pointer;border-radius:4px;font-family:inherit;font-size:12px;letter-spacing:1px}
+    #scans-btn:hover{background:rgba(79,195,247,.22)}
+
+    #rec-area{position:fixed;bottom:76px;left:50%;transform:translateX(-50%);z-index:10;display:flex;flex-direction:column;align-items:center;gap:6px}
+    #rec-btn,#stop-btn{width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-family:inherit;font-size:10px;font-weight:bold;letter-spacing:1px}
+    #rec-btn{background:#c62828;color:#fff;box-shadow:0 0 18px rgba(198,40,40,.5)}
+    #rec-btn:hover{background:#e53935}
+    #rec-btn .dot{width:16px;height:16px;border-radius:50%;background:#fff}
+    #stop-btn{background:#111;color:#fff;border:2px solid #f44336;display:none}
+    #stop-btn .sq{width:18px;height:18px;background:#f44336;border-radius:2px}
+    @keyframes pulse{0%,100%{box-shadow:0 0 10px rgba(244,67,54,.4)}50%{box-shadow:0 0 26px rgba(244,67,54,.95)}}
+    .recording #stop-btn{animation:pulse 1.2s infinite}
+    #rec-timer{font-size:16px;color:#f44336;font-weight:bold;letter-spacing:2px;min-height:20px}
+
+    #drawer{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(6,12,18,.97);border-top:1px solid #1e3a4a;transition:transform .28s cubic-bezier(.4,0,.2,1);transform:translateY(calc(100% - 44px));max-height:300px}
+    #drawer.open{transform:translateY(0)}
+    #drw-head{height:44px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;border-bottom:1px solid #1e3a4a;user-select:none}
+    #drw-head span{font-size:13px;color:#4fc3f7;letter-spacing:1px}
+    #drw-arrow{transition:transform .28s;font-size:14px;color:#4fc3f7}
+    #drawer.open #drw-arrow{transform:rotate(180deg)}
+    #drw-body{overflow-y:auto;max-height:252px}
+    .bag-row{display:flex;align-items:center;padding:7px 14px;border-bottom:1px solid #0d1a24;gap:8px;font-size:12px}
+    .bag-row:hover{background:rgba(79,195,247,.05)}
+    .bag-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .bag-meta{color:#607d8b;white-space:nowrap;font-size:11px}
+    .bag-actions{display:flex;gap:5px;flex-shrink:0}
+    .bbtn{padding:4px 7px;border-radius:3px;border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:bold}
+    .b-dl{background:rgba(79,195,247,.15);color:#4fc3f7}
+    .b-rn{background:rgba(255,152,0,.15);color:#ff9800}
+    .b-rm{background:rgba(244,67,54,.15);color:#f44336}
+    .b-ex{background:rgba(76,175,80,.15);color:#4caf50}
+    .bbtn:hover{filter:brightness(1.4)}
+    #drw-empty{padding:18px;text-align:center;color:#607d8b;font-size:12px}
+
+    .ov{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center}
+    .ov.show{display:flex}
+    .card{background:#0d1a24;border:1px solid #1e3a4a;border-radius:8px;padding:22px;width:90%;max-width:400px}
+    .card h3{color:#4fc3f7;margin-bottom:14px;font-size:13px;letter-spacing:1px}
+    .mrow{display:flex;justify-content:space-between;margin:5px 0;font-size:12px}
+    .mrow .v{color:#4fc3f7}
+    .minp{width:100%;margin-top:12px;padding:10px;background:#0a141e;border:1px solid #1e3a4a;color:#e0e0e0;font-family:inherit;font-size:13px;border-radius:4px;outline:none}
+    .minp:focus{border-color:#4fc3f7}
+    .mbtns{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+    .bp{padding:8px 18px;background:#4fc3f7;color:#000;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:12px}
+    .bs{padding:8px 18px;background:rgba(255,255,255,.08);color:#aaa;border:1px solid #333;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px}
+    .bd{padding:8px 18px;background:#c62828;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:12px}
+    .msep{border:none;border-top:1px solid #1e3a4a;margin:10px 0}
+    #hint{position:fixed;bottom:50px;right:12px;font-size:10px;color:#333;text-align:right;z-index:5;pointer-events:none}
+  </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
+
 <div id="info">
-  <h2>LiDAR Live</h2>
-  <div class="row">ROS: <span id="ros_status" class="warn">connecting...</span></div>
+  <h2>LiDAR Scanner</h2>
+  <div class="row">ROS: <span id="ros_st" class="warn">connecting…</span></div>
+  <div class="row">LiDAR: <span id="lid_st" class="warn">—</span></div>
+  <hr class="sep">
   <div class="row">Points: <span id="pts" class="val">0</span></div>
-  <div class="row">Rate: <span id="rate" class="val">0 Hz</span></div>
-  <hr style="border-color: #333; margin: 8px 0;">
-  <div class="row">Roll: <span id="roll" class="val">0°</span></div>
-  <div class="row">Pitch: <span id="pitch" class="val">0°</span></div>
-  <div class="row">Yaw: <span id="yaw" class="val">0°</span></div>
-  <hr style="border-color: #333; margin: 8px 0;">
-  <div style="font-size: 11px; color: #666;">
-    Drag: rotate<br>
-    Scroll: zoom
+  <div class="row">Rate: <span id="rate" class="val">— Hz</span></div>
+  <hr class="sep">
+  <div class="row">Roll: <span id="roll" class="val">—°</span></div>
+  <div class="row">Pitch: <span id="pitch" class="val">—°</span></div>
+  <div class="row">Yaw: <span id="yaw" class="val">—°</span></div>
+  <button id="scans-btn" onclick="toggleDrawer()">📁 SCANS</button>
+</div>
+
+<div id="rec-area">
+  <button id="rec-btn" onclick="startRec()"><div class="dot"></div>SCAN</button>
+  <button id="stop-btn" onclick="stopRec()"><div class="sq"></div>STOP</button>
+  <div id="rec-timer"></div>
+</div>
+
+<div id="hint">Drag: rotate · Scroll: zoom</div>
+
+<div id="drawer">
+  <div id="drw-head" onclick="toggleDrawer()">
+    <span>📁 SCANS (<span id="bag-cnt">0</span>)</span>
+    <span id="drw-arrow">▲</span>
+  </div>
+  <div id="drw-body"><div id="drw-empty">Keine Scans vorhanden</div></div>
+</div>
+
+<!-- Save modal -->
+<div id="save-ov" class="ov">
+  <div class="card">
+    <h3>💾 SCAN SPEICHERN?</h3>
+    <div class="mrow">Dauer: <span id="s-dur" class="v">—</span></div>
+    <div class="mrow">Grösse: <span id="s-size" class="v">—</span></div>
+    <div class="mrow" style="font-size:10px;color:#607d8b">Datei: <span id="s-file">—</span></div>
+    <hr class="msep">
+    <input id="s-name" class="minp" type="text" placeholder="Scan-Name eingeben…">
+    <div class="mbtns">
+      <button class="bd" onclick="discardRec()">🗑 VERWERFEN</button>
+      <button class="bp" onclick="saveRec()">💾 SPEICHERN</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename modal -->
+<div id="ren-ov" class="ov">
+  <div class="card">
+    <h3>✏ UMBENENNEN</h3>
+    <input id="ren-name" class="minp" type="text" placeholder="Neuer Name…">
+    <div class="mbtns">
+      <button class="bs" onclick="closeOv('ren-ov')">ABBRECHEN</button>
+      <button class="bp" onclick="doRename()">UMBENENNEN</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export-Download modal -->
+<div id="exp-ov" class="ov">
+  <div class="card">
+    <h3>📦 EXPORT BEREIT</h3>
+    <div class="mrow">Datei: <span id="exp-file" class="v">—</span></div>
+    <div class="mrow" style="font-size:11px;color:#607d8b">XYZ = ArchiCAD, CloudCompare, Rhino</div>
+    <div class="mbtns">
+      <button class="bs" onclick="closeOv('exp-ov')">SCHLIESSEN</button>
+      <button class="bp" onclick="dlExport()">↓ DOWNLOAD</button>
+    </div>
   </div>
 </div>
 
 <script src="/static/three.min.js"></script>
 <script src="/static/roslib.min.js"></script>
 <script>
-const canvas = document.getElementById("canvas");
-
 // Three.js
-const scene = new THREE.Scene();
+const canvas = document.getElementById("canvas");
+const scene  = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 10000);
-camera.position.set(0, 10, 30);
-camera.lookAt(0, 0, 0);
-
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-
-// Grid + Axes
-scene.add(new THREE.GridHelper(100, 100, 0x333333, 0x111111));
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 10000);
+camera.position.set(0, 10, 30); camera.lookAt(0,0,0);
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+scene.add(new THREE.GridHelper(100,100,0x1a2a2a,0x0d1515));
 scene.add(new THREE.AxesHelper(5));
-scene.add(new THREE.AmbientLight(0x404040));
-
-// Point cloud
 let ptGeom = new THREE.BufferGeometry();
-let ptMat = new THREE.PointsMaterial({ color: 0x00ff88, size: 0.08, sizeAttenuation: true });
-let ptCloud = new THREE.Points(ptGeom, ptMat);
+const ptMat = new THREE.PointsMaterial({color:0x00e5ff, size:0.07, sizeAttenuation:true});
+const ptCloud = new THREE.Points(ptGeom, ptMat);
 scene.add(ptCloud);
 
-// Mouse controls
-let isDragging = false, prevMouse = {x:0,y:0};
-canvas.addEventListener("mousedown", e => { isDragging=true; prevMouse={x:e.clientX,y:e.clientY}; });
-canvas.addEventListener("mouseup", () => isDragging=false);
-canvas.addEventListener("mousemove", e => {
-  if (!isDragging) return;
-  const dx = e.clientX - prevMouse.x, dy = e.clientY - prevMouse.y;
-  const q = new THREE.Quaternion();
-  q.setFromAxisAngle(new THREE.Vector3(0,1,0), dx*0.01);
-  camera.position.applyQuaternion(q);
-  const right = new THREE.Vector3();
-  camera.getWorldDirection(right); right.cross(camera.up).normalize();
-  q.setFromAxisAngle(right, dy*0.01);
-  camera.position.applyQuaternion(q);
-  camera.lookAt(0,0,0);
-  prevMouse = {x:e.clientX, y:e.clientY};
+// Mouse
+let drag=false, prev={x:0,y:0};
+canvas.addEventListener("mousedown",e=>{drag=true;prev={x:e.clientX,y:e.clientY}});
+canvas.addEventListener("mouseup",()=>drag=false);
+canvas.addEventListener("mousemove",e=>{
+  if(!drag)return;
+  const dx=e.clientX-prev.x, dy=e.clientY-prev.y, q=new THREE.Quaternion();
+  q.setFromAxisAngle(new THREE.Vector3(0,1,0),dx*.01); camera.position.applyQuaternion(q);
+  const r=new THREE.Vector3(); camera.getWorldDirection(r); r.cross(camera.up).normalize();
+  q.setFromAxisAngle(r,dy*.01); camera.position.applyQuaternion(q);
+  camera.lookAt(0,0,0); prev={x:e.clientX,y:e.clientY};
 });
-canvas.addEventListener("wheel", e => {
+canvas.addEventListener("wheel",e=>{e.preventDefault();camera.position.multiplyScalar(e.deltaY>0?1.1:.9)},{passive:false});
+// Touch
+let tc={}, pd=null;
+canvas.addEventListener("touchstart",e=>{[...e.touches].forEach(t=>tc[t.identifier]={x:t.clientX,y:t.clientY});if(e.touches.length===2){const a=e.touches[0],b=e.touches[1];pd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}},{passive:false});
+canvas.addEventListener("touchend",e=>{[...e.changedTouches].forEach(t=>delete tc[t.identifier]);if(e.touches.length<2)pd=null},{passive:false});
+canvas.addEventListener("touchmove",e=>{
   e.preventDefault();
-  camera.position.multiplyScalar(e.deltaY > 0 ? 1.1 : 0.9);
-}, {passive: false});
-
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  if(e.touches.length===1){const t=e.touches[0],p=tc[t.identifier]||{x:t.clientX,y:t.clientY},dx=t.clientX-p.x,dy=t.clientY-p.y,q=new THREE.Quaternion();
+    q.setFromAxisAngle(new THREE.Vector3(0,1,0),dx*.01);camera.position.applyQuaternion(q);
+    const r=new THREE.Vector3();camera.getWorldDirection(r);r.cross(camera.up).normalize();
+    q.setFromAxisAngle(r,dy*.01);camera.position.applyQuaternion(q);
+    camera.lookAt(0,0,0);tc[t.identifier]={x:t.clientX,y:t.clientY};
+  }else if(e.touches.length===2&&pd!==null){const a=e.touches[0],b=e.touches[1],d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);camera.position.multiplyScalar(pd/d);camera.lookAt(0,0,0);pd=d;}
+},{passive:false});
+window.addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+(function animate(){requestAnimationFrame(animate);renderer.render(scene,camera)})();
 
 // ROS
-const ros = new ROSLIB.Ros({ url: "ws://" + location.hostname + ":9090" });
-ros.on("connection", () => {
-  document.getElementById("ros_status").textContent = "connected";
-  document.getElementById("ros_status").className = "ok";
-  subscribeTopics();
-});
-ros.on("error", e => {
-  document.getElementById("ros_status").textContent = "error";
-  document.getElementById("ros_status").className = "err";
-});
-ros.on("close", () => {
-  document.getElementById("ros_status").textContent = "disconnected";
-  document.getElementById("ros_status").className = "warn";
-});
+const ros=new ROSLIB.Ros({url:"ws://"+location.hostname+":9090"});
+const setSt=(id,txt,cls)=>{const e=document.getElementById(id);e.textContent=txt;e.className=cls};
+ros.on("connection",()=>setSt("ros_st","connected","ok"));
+ros.on("error",()=>setSt("ros_st","error","err"));
+ros.on("close",()=>setSt("ros_st","offline","warn"));
 
-let frameCount = 0, lastFpsTime = Date.now();
-
-function subscribeTopics() {
-  // Subscribe to IMU only via rosbridge (lightweight)
-  // Point cloud comes via Flask API (pre-processed, fast)
-
-  // IMU via Flask API (sbg_reader.py → /tmp/imu.json → /api/imu)
-  setInterval(async () => {
-    try {
-      const res = await fetch("/api/imu");
-      const d = await res.json();
-      document.getElementById("roll").textContent  = d.roll.toFixed(1)  + "°";
-      document.getElementById("pitch").textContent = d.pitch.toFixed(1) + "°";
-      document.getElementById("yaw").textContent   = d.yaw.toFixed(1)   + "°";
-    } catch(e) {}
-  }, 200);
-}
-
-// Fetch points from Flask API (fast, pre-processed)
-async function fetchPoints() {
-  try {
-    const res = await fetch("/api/points");
-    const pts = await res.json();
-    if (pts && pts.length > 0) {
-      const pos = new Float32Array(pts.length * 3);
-      for (let i = 0; i < pts.length; i++) {
-        pos[i*3]   = pts[i][0];      // x
-        pos[i*3+1] = pts[i][2];      // z -> y
-        pos[i*3+2] = -pts[i][1];     // -y -> z
-      }
-      ptGeom.dispose();
-      ptGeom = new THREE.BufferGeometry();
-      ptGeom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      ptCloud.geometry = ptGeom;
-      document.getElementById("pts").textContent = pts.length;
-      frameCount++;
-      const now = Date.now();
-      if (now - lastFpsTime > 1000) {
-        document.getElementById("rate").textContent = frameCount + " Hz";
-        frameCount = 0;
-        lastFpsTime = now;
-      }
+// Points
+let fc=0, fct=Date.now();
+async function fetchPts(){
+  try{
+    const r=await fetch("/api/points"), pts=await r.json();
+    if(pts&&pts.length>0){
+      const pos=new Float32Array(pts.length*3);
+      for(let i=0;i<pts.length;i++){pos[i*3]=pts[i][0];pos[i*3+1]=pts[i][2];pos[i*3+2]=-pts[i][1]}
+      ptGeom.dispose(); ptGeom=new THREE.BufferGeometry();
+      ptGeom.setAttribute("position",new THREE.BufferAttribute(pos,3));
+      ptCloud.geometry=ptGeom;
+      document.getElementById("pts").textContent=pts.length;
+      fc++; const now=Date.now();
+      if(now-fct>1000){document.getElementById("rate").textContent=fc+" Hz";fc=0;fct=now;setSt("lid_st","ok","ok")}
     }
-  } catch(e) {
-    console.error("fetch points:", e);
-  }
-  setTimeout(fetchPoints, 200);
+  }catch(e){}
+  setTimeout(fetchPts,200);
 }
-fetchPoints();
+fetchPts();
 
-// Animate
-function animate() {
-  requestAnimationFrame(animate);
-  renderer.render(scene, camera);
+// IMU
+setInterval(async()=>{
+  try{const r=await fetch("/api/imu"),d=await r.json();
+    document.getElementById("roll").textContent=d.roll.toFixed(1)+"°";
+    document.getElementById("pitch").textContent=d.pitch.toFixed(1)+"°";
+    document.getElementById("yaw").textContent=d.yaw.toFixed(1)+"°";
+  }catch(e){}
+},250);
+
+// Recording
+let curBag=null, recT0=null, recIv=null;
+const recArea=document.getElementById("rec-area");
+const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+async function startRec(){
+  const r=await fetch("/api/record/start",{method:"POST"}),d=await r.json();
+  if(!d.ok){alert("Fehler: "+d.msg);return}
+  curBag=d.bag; recT0=Date.now();
+  document.getElementById("rec-btn").style.display="none";
+  document.getElementById("stop-btn").style.display="flex";
+  recArea.classList.add("recording");
+  recIv=setInterval(()=>document.getElementById("rec-timer").textContent=fmt(Math.floor((Date.now()-recT0)/1000)),1000);
 }
-animate();
+
+async function stopRec(){
+  clearInterval(recIv);
+  await fetch("/api/record/stop",{method:"POST"});
+  document.getElementById("rec-btn").style.display="flex";
+  document.getElementById("stop-btn").style.display="none";
+  document.getElementById("rec-timer").textContent="";
+  recArea.classList.remove("recording");
+  showSaveOv();
+}
+
+async function showSaveOv(){
+  const dur=Math.floor((Date.now()-recT0)/1000);
+  document.getElementById("s-dur").textContent=fmt(dur)+" ("+Math.ceil(dur/60)+" min)";
+  document.getElementById("s-file").textContent=curBag||"—";
+  document.getElementById("s-size").textContent="…";
+  const ts=(curBag||"").replace("scan_","").replace(".bag","");
+  document.getElementById("s-name").value="Scan "+ts.replace(/_/g," ");
+  document.getElementById("save-ov").classList.add("show");
+  document.getElementById("s-name").focus();
+  await new Promise(r=>setTimeout(r,1500));
+  try{const r=await fetch("/api/bags"),bags=await r.json(),b=bags.find(x=>x.name===curBag);
+    document.getElementById("s-size").textContent=b?b.size_mb+" MB":"—";
+  }catch(e){}
+}
+
+async function saveRec(){
+  const name=document.getElementById("s-name").value.trim();
+  if(!name){document.getElementById("s-name").focus();return}
+  await fetch("/api/bags/"+encodeURIComponent(curBag)+"/rename",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+  closeOv("save-ov"); loadBags();
+}
+async function discardRec(){
+  if(curBag) await fetch("/api/bags/"+encodeURIComponent(curBag),{method:"DELETE"});
+  closeOv("save-ov");
+}
+
+// Drawer
+let dwOpen=false;
+function toggleDrawer(){dwOpen=!dwOpen;document.getElementById("drawer").classList.toggle("open",dwOpen);if(dwOpen)loadBags()}
+
+async function loadBags(){
+  try{
+    const r=await fetch("/api/bags"),bags=await r.json();
+    document.getElementById("bag-cnt").textContent=bags.length;
+    const body=document.getElementById("drw-body");
+    if(!bags.length){body.innerHTML='<div id="drw-empty">Keine Scans vorhanden</div>';return}
+    body.innerHTML=bags.map(b=>`<div class="bag-row">
+      <div class="bag-name" title="${b.name}">${b.name.replace(/\.bag$/,"")}</div>
+      <div class="bag-meta">${b.size_mb}MB&nbsp;·&nbsp;${b.mtime.split(" ")[0]}</div>
+      <div class="bag-actions">
+        <button class="bbtn b-dl" onclick="dlBag('${b.name}')">↓</button>
+        <button class="bbtn b-rn" onclick="openRename('${b.name}')">✏</button>
+        <button class="bbtn b-rm" onclick="delBag('${b.name}')">🗑</button>
+        <button class="bbtn b-ex" onclick="exportBag('${b.name}')">XYZ</button>
+      </div></div>`).join("");
+  }catch(e){}
+}
+
+function dlBag(n){window.location="/api/download/"+encodeURIComponent(n)}
+
+async function delBag(n){
+  if(!confirm("Scan löschen?\n"+n.replace(/\.bag$/,"")))return;
+  await fetch("/api/bags/"+encodeURIComponent(n),{method:"DELETE"});loadBags();
+}
+
+let renTgt=null;
+function openRename(n){renTgt=n;document.getElementById("ren-name").value=n.replace(/\.bag$/,"");document.getElementById("ren-ov").classList.add("show");document.getElementById("ren-name").focus()}
+async function doRename(){
+  const name=document.getElementById("ren-name").value.trim();
+  if(!name)return;
+  await fetch("/api/bags/"+encodeURIComponent(renTgt)+"/rename",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+  closeOv("ren-ov"); loadBags();
+}
+
+let expFile=null;
+async function exportBag(n){
+  const r=await fetch("/api/bags/"+encodeURIComponent(n)+"/export",{method:"POST"}),d=await r.json();
+  if(d.ok){expFile=d.file;document.getElementById("exp-file").textContent=d.file;document.getElementById("exp-ov").classList.add("show")}
+  else alert("Export Fehler: "+d.msg);
+}
+function dlExport(){if(expFile)window.location="/api/download/"+encodeURIComponent(expFile);closeOv("exp-ov")}
+
+function closeOv(id){document.getElementById(id).classList.remove("show")}
+document.getElementById("s-name").addEventListener("keydown",e=>{if(e.key==="Enter")saveRec();if(e.key==="Escape")closeOv("save-ov")});
+document.getElementById("ren-name").addEventListener("keydown",e=>{if(e.key==="Enter")doRename();if(e.key==="Escape")closeOv("ren-ov")});
 </script>
 </body>
 </html>
