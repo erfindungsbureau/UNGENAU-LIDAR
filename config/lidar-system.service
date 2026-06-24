@@ -1,0 +1,16 @@
+[Unit]
+Description=LiDAR Scanner System (ROS + Flask)
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=nvidia
+ExecStart=/bin/bash /home/nvidia/start_lidar.sh
+Restart=no
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
