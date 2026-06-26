@@ -17,8 +17,8 @@ Handgehaltener 3D-Scanner für den mobilen Einsatz bei Bestandsaufnahmen von Geb
 Beim Einschalten des Jetson starten alle notwendigen Programmteile automatisch.
 
 **Steuerung über Netzwerk:**
-- Zuhause (WLAN *StudioFiume*): Jetson verbindet als Client → [http://192.168.31.39:5000](http://192.168.31.39:5000)
-- Kein bekanntes WLAN: Jetson öffnet Hotspot **LidarScanner** (`lidar1234`) mit Captive Portal → [http://10.42.0.1:5000](http://10.42.0.1:5000)
+- Bekanntes WLAN erreichbar: Jetson verbindet sich automatisch → Web Interface unter der zugewiesenen IP
+- Kein bekanntes WLAN: Jetson erstellt Hotspot mit Captive Portal → [http://10.42.0.1:5000](http://10.42.0.1:5000)
 
 **Control Panel (Webseite):**
 - Scans starten und stoppen
@@ -28,6 +28,23 @@ Beim Einschalten des Jetson starten alle notwendigen Programmteile automatisch.
 - Live-Vorschau der LiDAR-Punktwolke mit SLAM-Aufbau *(sekundär)*
 
 **Prinzip:** Die gesamte SLAM-Berechnung läuft auf dem Jetson im Hintergrund — Fokus auf Effizienz und Genauigkeit. Die Webdarstellung ist bewusst sekundär.
+
+## WiFi Konfiguration
+
+Bekannte Netzwerke und Hotspot-Einstellungen werden in `config/wifi.conf` verwaltet:
+
+```ini
+[known_networks]
+MeinWLAN|passwort
+BueroWLAN|passwort
+iPhoneHotspot|passwort
+
+[hotspot]
+SSID=LidarScanner
+PASSWORD=lidar1234
+```
+
+Der Jetson verbindet sich automatisch mit dem **stärksten verfügbaren** Netz aus der Liste. Es können beliebig viele Netzwerke eingetragen werden (zuhause, büro, iPhone-Hotspot etc.).
 
 ## System
 
@@ -41,11 +58,11 @@ Beim Einschalten des Jetson starten alle notwendigen Programmteile automatisch.
 
 | | Adresse |
 |---|---|
-| WiFi Client (StudioFiume) | http://192.168.31.39:5000 |
+| WiFi Client | http://\<IP\>:5000 (IP aus Router / `lidar.local:5000`) |
 | Hotspot (LidarScanner) | http://10.42.0.1:5000 |
 | LiDAR (statisch, eth0) | 192.168.2.2 |
 | Jetson eth0 | 192.168.2.1 |
-| SMB Dateitransfer | smb://192.168.31.39/lidar_data (User: nvidia / Pass: nvidia) |
+| SMB Dateitransfer | smb://\<IP\>/lidar_data (User: nvidia / Pass: nvidia) |
 
 ## Starten
 
@@ -56,17 +73,18 @@ Beim Einschalten des Jetson starten alle notwendigen Programmteile automatisch.
 ## Dateistruktur
 
 ```
+config/
+  wifi.conf               WLAN-Netzwerke und Hotspot-Einstellungen  ← hier anpassen
+  slam.launch             LIO-SAM + imu_filter Konfiguration
+  smb.conf                Samba
 scripts/
   start_lidar.sh          Alles starten (roscore, ouster, sbg, slam, flask)
-  wifi_ap.sh              WiFi / Hotspot Logik
+  wifi_ap.sh              WiFi / Hotspot Logik (liest wifi.conf)
   bridge.py               ROS→Flask Brücke (Python 2)
   bag_to_xyz_hires.py     HD-Export: Odometrie-Poses + raw Ouster-Punkte
 webui/
   app.py                  Flask Backend (Recording, Status, Export, USB)
   templates/              HTML Frontend (Steuerung, Vorschau)
-config/
-  slam.launch             LIO-SAM + imu_filter Konfiguration
-  smb.conf                Samba
 docs/
   setup-jetson.md         Jetson Setup (JetPack 4.6, USB-Fix, DTB)
   hardware-connections.md Verkabelung
