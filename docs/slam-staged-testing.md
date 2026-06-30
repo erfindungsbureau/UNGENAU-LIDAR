@@ -61,11 +61,17 @@ Zwei Tests:
 SBG-Anbindung (Stufe 2 wird das bestätigen). Tritt sie *weiterhin* auf, liegt es eher
 an der Engine/Bewegungsart selbst.
 
-- [ ] Datum:
-- [ ] Bag-Datei (statisch):
-- [ ] Bag-Datei (Bewegung):
-- [ ] Ergebnis statisch:
-- [ ] Ergebnis Bewegung:
+- [x] Datum: 2026-06-30
+- [ ] Bag-Datei (statisch): noch ausstehend
+- [x] Bag-Datei (Bewegung): lidar_data/staged_tests/stage1_ouster_imu_20260630.bag (598 LiDAR-Frames, 59.8s)
+- [ ] Ergebnis statisch: noch ausstehend
+- [x] Ergebnis Bewegung: **/cloud_registered publiziert nur 16x in 60s (~0.27 Hz statt ~10 Hz)** -
+      FAST-LIO2 verarbeitet mit der Ouster-internen IMU nur einen Bruchteil der Scans. Power-Mode
+      war bereits MAXN (nicht die Ursache). Export als XYZ zur visuellen Pruefung heruntergeladen
+      (stage1_ouster_imu_slam.xyz, 265k Punkte / 16 Frames). Bewertung durch Nutzer ausstehend.
+      NEBENBEFUND: bag_to_xyz.py/bag_to_xyz_hires.py kannten nur LIO-SAM-Topics
+      (/lio_sam/mapping/cloud_registered, /lio_sam/mapping/odometry), nicht FAST-LIO2s
+      /cloud_registered und /Odometry -> gefixt (Commit in scripts/).
 
 ## Stufe 2 — FAST-LIO2 + SBG Ellipse 2 (aktueller Produktivstand)
 
