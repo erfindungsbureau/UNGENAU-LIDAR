@@ -79,6 +79,25 @@ an der Engine/Bewegungsart selbst.
       (/lio_sam/mapping/cloud_registered, /lio_sam/mapping/odometry), nicht FAST-LIO2s
       /cloud_registered und /Odometry -> gefixt (Commit in scripts/).
 
+### Stufe 1 - Nachtrag (v3, mit verifizierter Bewegung)
+
+- [x] Datum: 2026-06-30
+- [x] Bag-Datei: stage1_ouster_imu_20260630_v3.bag (698 LiDAR-Frames, 69s, 17 cloud_registered)
+- [x] **KRITISCHER BEFUND:** IMU-Gyro zeigt eindeutige Bewegung (62.6% der Samples > 0.1 rad/s,
+      Max 1.17 rad/s = ~67 Grad/s) -- aber /Odometry-Pose bewegt sich praktisch NICHT
+      (Gesamtstrecke ueber 17 Posen: 0.01m, Bounding-Box ~0x0x0m). FAST-LIO2 mit der
+      Ouster-internen IMU **verliert die Bewegungsschaetzung vollstaendig**, obwohl der Sensor
+      sich nachweislich bewegt hat. Die wenigen exportierten Frames sehen deshalb optisch
+      deckungsgleich aus (Pose eingefroren) -- das ist aber kein funktionierendes SLAM, sondern
+      ein haengen gebliebener Tracker, keine echte Kartierung.
+- [x] Schlussfolgerung Stufe 1: **FAST-LIO2 + Ouster-interne IMU ist in dieser Konfiguration
+      nicht nutzbar.** Wahrscheinliche Ursache: acc_cov/gyr_cov in fast_lio_ouster_imu.yaml
+      sind 1:1 von der SBG-Config uebernommen -- die (vermutlich deutlich verrauschtere)
+      Ouster-IMU braucht andere (hoehere) Kovarianzwerte, sonst vertraut der iEKF der IMU zu
+      stark und divergiert/haengt. Vor einer erneuten Stufe-1-Verifikation muesste man diese
+      Werte fuer die Ouster-IMU neu kalibrieren -- nicht weiter verfolgt, da Stufe 2 (SBG)
+      bereits im Produktivbetrieb getestet werden kann.
+
 ## Stufe 2 — FAST-LIO2 + SBG Ellipse 2 (aktueller Produktivstand)
 
 Config: `ros/config/fast_lio_sbg.yaml` (`imu_topic: /imu/data`)
