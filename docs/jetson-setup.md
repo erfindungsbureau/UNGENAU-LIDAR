@@ -114,5 +114,11 @@ sudo jetson_clocks   # CPU/GPU-Takt fixieren
   Kostenverlauf für reine Yaw-Rotation ist dort flach, was zu Drift führt obwohl die IMU-Pipeline
   korrekt arbeitet (bestätigt durch statischen Scan ohne Bewegung). Deshalb FAST-LIO2 als
   Alternative installiert, siehe [slam-staged-testing.md](slam-staged-testing.md).
+- **Claude Code CLI benötigt Node ≥18, Ubuntu 18.04 hat nur glibc 2.27** (Node 18+
+  Binaries verlangen glibc ≥2.28). System-glibc-Upgrade ist auf diesem Embedded-System zu
+  riskant. Workaround: Node 16.20.4 (letzte glibc-2.27-kompatible Version) manuell nach
+  `~/.local/node16/` installiert, in PATH via .bashrc. `npm install -g @anthropic-ai/claude-code`
+  läuft darauf trotz EBADENGINE-Warnung tatsächlich (getestet: `claude --version` funktioniert).
+  Node-Quelle: https://nodejs.org/dist/v16.20.2/node-v16.20.2-linux-arm64.tar.xz
 - **RoboStack/Conda-ROS wurde evaluiert, aber nicht verwendet** — das System läuft nativ über
   ROS Melodic (apt). Reste der RoboStack-Recherche liegen in `archive/` falls relevant.
