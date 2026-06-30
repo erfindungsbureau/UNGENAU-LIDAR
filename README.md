@@ -96,6 +96,16 @@ Beide sind über die Web-UI per Klick wählbar. Details zum systematischen Teste
 - [docs/architecture.md](docs/architecture.md) — Datenfluss, ARM/DISARM-State-Machine
 - [docs/slam-staged-testing.md](docs/slam-staged-testing.md) — SLAM-Stufentest-Protokoll
 
+## Export-Optionen
+
+`scripts/bag_to_xyz_hires.py` unterstützt einen optionalen Reflectivity-Filter gegen
+Geisterpunkte von Spiegeln/Glasflächen:
+```bash
+python2 scripts/bag_to_xyz_hires.py scan.bag output.xyz 1 "" 150
+```
+Letzter Parameter = maximale Reflectivity (0 = aus/Standard, 150-180 = guter Startwert
+zum Testen). Punkte mit höherer Reflectivity werden verworfen.
+
 ## Bekannte Probleme
 
 - **Scan-Überlagerung bei Bewegung** — gelöst (2026-06-30): falsche Extrinsik-Konvention in
