@@ -54,6 +54,7 @@ def slerp_quat(q1, q2, t):
 print("Lese Odometry-Poses...")
 pose_times = []
 pose_R     = []
+pose_Q     = []   # Quaternionen [x,y,z,w] fuer korrekte Slerp-Interpolation
 pose_T     = []
 
 with rosbag.Bag(bag_file, 'r') as bag:
@@ -80,6 +81,7 @@ with rosbag.Bag(bag_file, 'r') as bag:
         p = msg.pose.pose.position
         pose_times.append(t.to_sec())
         pose_R.append(quat_to_rot(q.x, q.y, q.z, q.w))
+        pose_Q.append(np.array([q.x, q.y, q.z, q.w], dtype=np.float64))
         pose_T.append(np.array([p.x, p.y, p.z], dtype=np.float64))
 
 print("  %d Poses geladen" % len(pose_times))
@@ -98,10 +100,11 @@ def get_pose(ts):
     alpha = (ts - t0) / (t1 - t0) if t1 > t0 else 0.0
     # Lineare Interpolation Translation
     t_interp = pose_T[idx-1] * (1-alpha) + pose_T[idx] * alpha
-    # Slerp Rotation via Quaternion
-    R0, R1 = pose_R[idx-1], pose_R[idx]
-    # Naeheste-Nachbar fuer Rotation (ausreichend bei 10Hz LiDAR / 3.5Hz Pose)
-    R_interp = R0 if alpha < 0.5 else R1
+    # Echtes Slerp via Quaternion (vorher faelschlich Naechster-Nachbar -- bei
+    # schneller Rotation und ~2Hz Pose-Rate fuehrte das zu sichtbarem "Zerreissen"
+    # der Punktwolke zwischen aufeinanderfolgenden Rohscans)
+    q_interp = slerp_quat(pose_Q[idx-1], pose_Q[idx], alpha)
+    R_interp = quat_to_rot(q_interp[0], q_interp[1], q_interp[2], q_interp[3])
     return R_interp, t_interp
 
 # Export
