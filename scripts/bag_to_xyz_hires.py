@@ -5,7 +5,8 @@ bag_to_xyz_hires.py - Hochaufloesender XYZ Export
 Verwendet /lio_sam/mapping/odometry (Poses) + /ouster/points (rohe 65k Punkte/Frame)
 statt des downgesampelten /lio_sam/mapping/cloud_registered.
 
-Aufruf: python bag_to_xyz_hires.py input.bag output.xyz [frame_step] [max_sec]
+Aufruf: python bag_to_xyz_hires.py input.bag output.xyz [frame_step] [max_sec] [max_reflectivity]
+# max_reflectivity: 0=aus (Standard), sonst Punkte mit Reflectivity > Wert verwerfen (gegen Spiegel/Glas)
 """
 import sys, math, bisect
 import numpy as np
@@ -16,6 +17,10 @@ bag_file   = sys.argv[1]
 xyz_file   = sys.argv[2]
 frame_step = int(sys.argv[3])   if len(sys.argv) > 3 else 1
 max_sec    = float(sys.argv[4]) if len(sys.argv) > 4 else None
+# Reflectivity-Filter gegen Spiegelungen/Glas (spiegelnde Flaechen erzeugen oft
+# anomal hohe oder sehr inkonsistente Reflektivitaetswerte -> Geisterpunkte).
+# 0 = deaktiviert (Standard). Sinnvoller Startwert zum Testen: 150-180.
+max_reflectivity = int(sys.argv[5]) if len(sys.argv) > 5 else 0
 
 # Extrinsic: LiDAR -> IMU (aus params.yaml)
 EXT_R = np.array([[1,0,0],[0,-1,0],[0,0,-1]], dtype=np.float64)
@@ -120,8 +125,16 @@ with open(xyz_file, 'w') as f_out:
 
             R_odom, t_odom = get_pose(ts)
 
-            pts = np.array(list(pc2.read_points(
-                msg, field_names=('x','y','z'), skip_nans=True)), dtype=np.float64)
+            if max_reflectivity > 0:
+                raw = np.array(list(pc2.read_points(
+                    msg, field_names=('x','y','z','reflectivity'), skip_nans=True)), dtype=np.float64)
+                if len(raw) == 0:
+                    continue
+                raw = raw[raw[:,3] <= max_reflectivity]
+                pts = raw[:, :3]
+            else:
+                pts = np.array(list(pc2.read_points(
+                    msg, field_names=('x','y','z'), skip_nans=True)), dtype=np.float64)
             if len(pts) == 0:
                 continue
 
