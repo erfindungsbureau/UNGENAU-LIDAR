@@ -146,6 +146,28 @@ tatsächlich in der SLAM-Pipeline verwendet wird.
 - [ ] Max. Abweichung Roll / Pitch / Yaw:
 - [ ] Bewertung (Kalibrierung plausibel? Nachkalibrierung nötig?):
 
+## LIO-SAM Vergleichstest (Diagnose, ausserhalb der Stufen 0-3)
+
+Nach Stufe 1+2 stand fest: FAST-LIO2 trackt die Pose ueberhaupt nicht (komplett eingefroren),
+egal welche IMU-Quelle. Um zu klaeren ob das Problem an FAST-LIO2 selbst liegt oder tiefer
+(Sensordaten/Zeitstempel) wurde LIO-SAM mit der gleichen Bewegung getestet.
+
+- [x] Datum: 2026-06-30
+- [x] Bag-Datei: stage_liosam_compare_20260630.bag (44.7s, mit SBG-IMU)
+- [x] **Verarbeitungsrate: 102 Frames in 44.7s = ~2.3 Hz** (FAST-LIO2 zum Vergleich: ~0.27 Hz,
+      8.5x langsamer).
+- [x] **Pose-Tracking: LIO-SAM bewegt die Pose deutlich und plausibel.** Odometry-Werte sind in
+      Millimetern (nicht Metern wie bei FAST-LIO2) -- umgerechnet: Bounding-Box ca. 0.85m x 0.49m
+      x 0.15m, Gesamtstrecke ca. 2.6m ueber 45s Bewegung. Das ist eine realistische Strecke fuer
+      Herumlaufen in einem Raum.
+- [x] **Schlussfolgerung: Das Problem ist FAST-LIO2-spezifisch, nicht in den Rohdaten/Zeitstempeln
+      begruendet.** LIO-SAM verarbeitet dieselben /ouster/points + /imu/data Stroeme erfolgreich
+      mit plausibler Bewegungsschaetzung; FAST-LIO2 friert mit denselben Eingangsdaten ein.
+      Naechster Schritt: FAST-LIO2-Konfiguration gezielt debuggen (Extrinsik, Zeitsynchronisation,
+      max_iteration) statt IMU-Quelle zu wechseln. Die urspruengliche Scan-Ueberlagerung bei
+      LIO-SAM bleibt weiterhin durch die bekannte Degeneration in symmetrischen Raeumen erklaert
+      (siehe README) -- LIO-SAM trackt zwar zuverlaessig, driftet aber dort weiterhin.
+
 ## Ergebnis-Zusammenfassung
 
 (Nach Abschluss aller Stufen hier eintragen: wo liegt die Ursache, welche
