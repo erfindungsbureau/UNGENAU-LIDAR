@@ -73,6 +73,14 @@ arm_auto_timer  = None
 arm_timer_lock  = threading.Lock()
 arm_timer_start = None         # Zeitpunkt ARM gesetzt (fuer Countdown)
 
+# Diagnose-Modus: deaktiviert automatisches DISARM (Startup-Safety + 120s-Timeout).
+# Datei-basiert (nicht nur In-Memory), damit der Modus auch ueberlebt wenn Flask
+# waehrend Tests mehrfach neu gestartet wird (genau dafuer gedacht).
+DIAGNOSTIC_FLAG_FILE = "/tmp/diagnostic_mode"
+
+def is_diagnostic_mode():
+    return os.path.exists(DIAGNOSTIC_FLAG_FILE)
+
 
 def _cancel_arm_timer():
     global arm_auto_timer
@@ -84,6 +92,8 @@ def _cancel_arm_timer():
 def _start_arm_timer():
     global arm_auto_timer, arm_timer_start
     _cancel_arm_timer()
+    if is_diagnostic_mode():
+        return
     with arm_timer_lock:
         arm_timer_start = time.time()
         def _do_auto_disarm():
@@ -193,8 +203,10 @@ def _disarm_sequence():
         arm_state = "disarmed"
 
 def _startup_disarm():
-    """Beim Flask-Start: LiDAR STANDBY sicherstellen."""
+    """Beim Flask-Start: LiDAR STANDBY sicherstellen (uebersprungen im Diagnose-Modus)."""
     time.sleep(5)
+    if is_diagnostic_mode():
+        return
     ouster_set_mode("STANDBY")
     _stop_ouster_driver()
 
@@ -412,6 +424,24 @@ def index():
     return r
 
 
+@app.route("/api/diagnostic/enable", methods=["POST"])
+def api_diagnostic_enable():
+    open(DIAGNOSTIC_FLAG_FILE, "w").close()
+    _cancel_arm_timer()
+    return jsonify({"ok": True, "diagnostic_mode": True,
+                     "msg": "Diagnose-Modus aktiv: kein Auto-DISARM (Startup-Safety + 120s-Timeout deaktiviert)"})
+
+
+@app.route("/api/diagnostic/disable", methods=["POST"])
+def api_diagnostic_disable():
+    try:
+        os.remove(DIAGNOSTIC_FLAG_FILE)
+    except FileNotFoundError:
+        pass
+    return jsonify({"ok": True, "diagnostic_mode": False,
+                     "msg": "Diagnose-Modus deaktiviert: Auto-DISARM wieder normal aktiv"})
+
+
 @app.route("/api/lidar/off", methods=["POST"])
 def api_lidar_off():
     if is_recording():
@@ -436,20 +466,28 @@ def api_lidar_on():
     r1, r2 = ouster_set_mode("NORMAL")
     sensor_ok = "error" not in r1.lower()
 
-    # ouster_ros Driver immer neu starten (stirbt nach STANDBY)
-    subprocess.Popen(
-        ["bash", "-c",
-         "pkill -f 'ouster_ros|os_nodelet|relay_lidar|relay_imu' 2>/dev/null; sleep 2; "
-         "source /opt/ros/melodic/setup.bash && "
-         "source /home/nvidia/catkin_ws/devel/setup.bash && "
-         "roslaunch ouster_ros sensor.launch "
-         "sensor_hostname:=192.168.2.2 udp_dest:=192.168.2.1 "
-         "lidar_mode:=1024x10 viz:=false timestamp_mode:=TIME_FROM_ROS_TIME "
-         ">> /tmp/ouster.log 2>&1"],
-        env={**os.environ,
-             "ROS_MASTER_URI": "http://localhost:11311",
-             "ROS_HOSTNAME": "localhost"}
-    )
+    # ouster_ros Driver immer neu starten (stirbt nach STANDBY).
+    # WICHTIG: pkill in einem EIGENEN Subprocess-Aufruf, getrennt vom roslaunch-Befehl.
+    # Grund: wenn beide im selben "bash -c"-String stehen, enthaelt die cmdline dieses
+    # bash-Prozesses selbst den Suchstring "ouster_ros" (aus dem spaeteren roslaunch-Teil)
+    # -> pkill toetet dann seinen eigenen Elternprozess mitten im Start (race condition).
+    # Läuft im Hintergrund-Thread, damit der Request sofort zurückkehrt (wie zuvor).
+    def _restart_ouster():
+        _stop_ouster_driver()
+        time.sleep(1)
+        subprocess.Popen(
+            ["bash", "-c",
+             "source /opt/ros/melodic/setup.bash && "
+             "source /home/nvidia/catkin_ws/devel/setup.bash && "
+             "roslaunch ouster_ros sensor.launch "
+             "sensor_hostname:=192.168.2.2 udp_dest:=192.168.2.1 "
+             "lidar_mode:=1024x10 viz:=false timestamp_mode:=TIME_FROM_ROS_TIME "
+             ">> /tmp/ouster.log 2>&1"],
+            env={**os.environ,
+                 "ROS_MASTER_URI": "http://localhost:11311",
+                 "ROS_HOSTNAME": "localhost"}
+        )
+    threading.Thread(target=_restart_ouster, daemon=True).start()
     msg = "LiDAR startet (~15s)..."
     return jsonify({"ok": True, "msg": msg, "set": r1, "reinit": r2})
 
@@ -486,6 +524,7 @@ def api_status():
         "arm_secs_left": max(0, int(120 - (time.time() - arm_timer_start))) if arm_timer_start and arm_state == "armed" else None,
         "export_running": is_export_running(),
         "slam_engine":  slam_engine,
+        "diagnostic_mode": is_diagnostic_mode(),
         "disk":         get_disk_info(),
         "time":         datetime.now().strftime("%H:%M:%S"),
     })
