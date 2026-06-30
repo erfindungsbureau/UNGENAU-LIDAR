@@ -226,7 +226,7 @@ def is_slam_process_running():
         if slam_process is not None and slam_process.poll() is None:
             return True
     # Auch extern gestartete SLAM-Prozesse erkennen
-    r = subprocess.run(["pgrep", "-f", "slam.launch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    r = subprocess.run(["pgrep", "-f", "UNGENAU-LIDAR/ros/launch/slam_"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return r.returncode == 0
 
 def is_export_running():
@@ -237,8 +237,7 @@ def kill_slam_all():
     """Beendet alle SLAM-Prozesse sauber, egal wie gestartet."""
     global slam_process
     patterns = [
-        "slam.launch",
-        "fast_lio.launch",
+        "UNGENAU-LIDAR/ros/launch/slam_",
         "fastlio_mapping",
         "laserMapping",
         "lio_sam_imuPreintegration",
