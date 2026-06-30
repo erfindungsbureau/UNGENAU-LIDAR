@@ -105,12 +105,24 @@ Launch: `ros/launch/slam_fast_lio_sbg.launch` (= Standard-Engine im Web-UI)
 
 Gleiche zwei Tests wie Stufe 1, möglichst gleicher Raum/Weg für direkten Vergleich.
 
-- [ ] Datum:
-- [ ] Bag-Datei (statisch):
-- [ ] Bag-Datei (Bewegung):
-- [ ] Ergebnis statisch:
-- [ ] Ergebnis Bewegung:
-- [ ] Vergleich zu Stufe 1:
+- [x] Datum: 2026-06-30
+- [x] Bag-Datei (Bewegung): stage2_sbg_20260630.bag (698 LiDAR-Frames, 69s, 17 cloud_registered)
+- [x] Ergebnis: **IDENTISCHES Symptom wie Stufe 1.** SBG zeigt eindeutig massive Bewegung waehrend
+      der Aufnahme (Roll-Range 93 Grad, Pitch-Range 76 Grad, volle 360 Grad Yaw-Drehung) -- aber
+      FAST-LIO2 Odometry-Pose bleibt ueber alle 17 Posen quasi eingefroren (Gesamtstrecke 0.01m,
+      Bounding-Box ~0x0x0m, x schwankt nur zwischen -0.006 und -0.008).
+- [x] Vergleich zu Stufe 1: **Kein Unterschied zwischen Ouster-IMU und SBG.** Beide IMU-Quellen
+      zeigen exakt dasselbe Symptom -> IMU-Quelle ist NICHT die Ursache der Scan-Ueberlagerung.
+- [x] Zusatztest: pcd_save_en auf false gesetzt (FAST-LIO2-Quellcode warnt explizit dass PCD-Save
+      die Echtzeitperformance beeintraechtigt) und mit 30s-Testaufnahme wiederholt: Rate blieb
+      gleich (8 Frames / 26s = ~0.3 Hz), Pose weiterhin eingefroren (Gesamtstrecke 5mm).
+      **pcd_save_en ist NICHT die Ursache.** Aenderung bleibt trotzdem bestehen (keine Nachteile,
+      Produktiv-Pipeline nutzt ohnehin bag_to_xyz.py statt FAST-LIO2s internem PCD-Export).
+- [x] **Schlussfolgerung Stufe 2: Das eigentliche Problem liegt tiefer in der FAST-LIO2-Konfiguration
+      selbst, nicht in der IMU-Quelle.** Naechste Verdaechtige: Extrinsik-Kalibrierung
+      (extrinsic_T/extrinsic_R aktuell Identitaet/Null), Zeitsynchronisation LiDAR<->IMU
+      (time_sync_en: false), oder Tuning-Parameter (max_iteration, blind, point_filter_num).
+      Erfordert gezieltes FAST-LIO2-Debugging, kein einfacher A/B-Test mehr.
 
 ## Stufe 3 — Orientierungs-Abgleich SBG vs. Ouster-IMU
 
