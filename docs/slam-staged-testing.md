@@ -201,6 +201,43 @@ egal welche IMU-Quelle. Um zu klaeren ob das Problem an FAST-LIO2 selbst liegt o
       vergroessern, max_iteration reduzieren. Ziel: CPU-Last pro Scan senken bis FAST-LIO2 nahe
       Echtzeit (~10Hz) mithalten kann.
 
+## Multi-Threading-Fix-Versuch (CMakeLists.txt Patch)
+
+Root-Cause-Hypothese aus dem CPU-Befund: FAST_LIO/CMakeLists.txt aktiviert OpenMP-Multithreading
+(omp_set_num_threads(MP_PROC_NUM)) nur fuer x86/AMD64 -- der Jetson TX2 (aarch64) faellt in den
+else-Zweig und laeuft mit MP_PROC_NUM=1 (single-threaded), unabhaengig von Kernanzahl.
+
+- [x] Datum: 2026-06-30
+- [x] Fix: CMakeLists.txt Architektur-Regex um "(aarch64)|(arm)" erweitert. Patch gesichert
+      unter ros/patches/FAST_LIO_CMakeLists.txt (FAST_LIO liegt ausserhalb des Git-Repos in
+      catkin_ws/src, daher keine eigene Versionskontrolle -- Patch hier dokumentiert fuer
+      Reproduzierbarkeit nach Neuinstallation).
+- [x] Neu kompiliert mit Clang-8 (gleicher Workaround wie urspruengliche Installation). Build
+      erfolgreich, CMake-Output bestaetigt: "core for MP: 2" (MP_PROC_NUM=2 aktiv,
+      ProcessorCount erkannte 4 -- die volle Kernzahl 6 wird durch eine Affinitaets-Einschraenkung
+      auf PID 1 nicht erkannt, siehe Hinweis unten).
+- [x] **Test mit Bewegung (50s): KEINE Verbesserung.** 14 cloud_registered Frames (vorher 13-18),
+      Pose weiterhin eingefroren (9.4mm Gesamtstrecke). CPU-Last blieb bei ~107% statt der
+      erwarteten ~200% bei aktiver 2-Thread-Parallelisierung.
+- [x] **Schlussfolgerung: Multi-Threading ist NICHT die (alleinige) Ursache.** Der mit
+      #pragma omp parallel for parallelisierte Codeabschnitt (Punkt-zu-Ebene-Residuen-Berechnung)
+      macht offenbar nur einen kleinen Teil der Gesamtverarbeitungszeit pro Scan aus. Die
+      konstante ~13-18-Frame-Rate ueber ALLE bisherigen Tests (1 vs. 2 Threads, langsam vs.
+      schnell, Ouster-IMU vs. SBG, mit/ohne pcd_save) spricht gegen reinen CPU-Durchsatz als
+      Engpass und eher fuer einen anderen dominanten Kostenfaktor -- wahrscheinlichster
+      Verdaechtiger: die ikd-Tree-Kartenverwaltung (Einfuegen neuer Punkte in die Baumstruktur),
+      die inhaerent sequentiell ist und sich nicht trivial parallelisieren laesst. Bei vollen
+      65536 Rohpunkten/Scan (nur leicht reduziert durch point_filter_num: 3) waechst diese
+      Baumstruktur schnell.
+- [x] **Empfohlener naechster Schritt:** Punktdichte VOR FAST-LIO2 reduzieren statt Threading
+      weiter zu optimieren -- z.B. point_filter_num deutlich erhoehen (z.B. 8 statt 3), oder
+      Ouster lidar_mode von 1024x10 auf 512x10 reduzieren (halbiert Rohpunktzahl). Das senkt die
+      Kosten sowohl der Residuen-Berechnung als auch der ikd-Tree-Operationen proportional.
+- [x] Nebenbefund: nproc zeigt nur 4 (Affinitaetsmaske von PID 1 ist "0,3-5", schliesst Kerne
+      1-2 aus) obwohl 6 Kerne online sind (cat /sys/devices/system/cpu/online -> 0-5). Ursache
+      nicht weiter untersucht (evtl. NVIDIA-eigene Kernreservierung), koennte bei weiterer
+      Performance-Optimierung relevant werden.
+
 ## Ergebnis-Zusammenfassung
 
 (Nach Abschluss aller Stufen hier eintragen: wo liegt die Ursache, welche
