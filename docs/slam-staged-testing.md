@@ -262,6 +262,30 @@ erwartet eine 3x3-Matrix (9 Werte), keine 3 Euler-Winkel.
       Algorithmus-Tuning. Naechster Test: einzelne Rohscans waehrend Bewegung visuell pruefen ob
       Kanten/Waende innerhalb eines einzelnen 360-Grad-Sweeps (~100ms) bereits verzogen wirken.
 
+## DURCHBRUCH: LIO-SAM Extrinsik-Konvention-Bug gefunden und gefixt
+
+Root-Cause endlich identifiziert: LIO-SAM wendet extrinsicRot auf rohe IMU-Messungen an
+("acc = extRot * acc" in utility.h) -- das erwartet die Rotation IMU-Frame -> LiDAR-Frame.
+FAST-LIO2 hingegen erwartet LiDAR-Frame -> IMU-Frame (offset_R_L_I, passend zu unseren
+Kalibrierdaten "T_lb: lidar -> imu"). Wir hatten die GLEICHE Matrix fuer beide Engines
+verwendet -- korrekt fuer FAST-LIO2, aber genau verkehrt herum fuer LIO-SAM (haette
+transponiert werden muessen).
+
+- [x] Datum: 2026-06-30
+- [x] Fix: extrinsicRot/extrinsicRPY in lio_sam_params.yaml auf die TRANSPONIERTE Matrix
+      gesetzt (IMU->LiDAR statt LiDAR->IMU).
+- [x] **Test mit Bewegung (45s, bestaetigte Bewegung am Scanner): Bounding-Box jetzt
+      2.62m x 2.61m x 0.86m, Gesamtstrecke 11.5m -- absolut plausibel fuer einen
+      Innenraum-Scan.** 173 Frames verarbeitet (~3.9 Hz, deutlich besser als FAST-LIO2s
+      ~0.2-0.3 Hz). Trajektorie bewegt sich kohaerent, keine Sprünge/Divergenz mehr.
+      XYZ-Export (579k Punkte) zur visuellen Bestaetigung heruntergeladen.
+- [x] **Schlussfolgerung: LIO-SAM mit korrigierter (transponierter) Extrinsik-Matrix liefert
+      ein funktionierendes Ergebnis.** FAST-LIO2 bleibt trotz umfangreicher Tests (siehe oben)
+      strukturell eingefroren -- vermutete Ursache: selbstverstaerkende lokale Falle ohne
+      Loop-Closure-Korrektur, nicht die Extrinsik (deren Konvention bei FAST-LIO2 von Anfang
+      an korrekt war). **Empfehlung: LIO-SAM (mit korrigierter Extrinsik) als Produktiv-Engine
+      verwenden, FAST-LIO2 vorerst zurueckstellen.**
+
 ## Ergebnis-Zusammenfassung
 
 (Nach Abschluss aller Stufen hier eintragen: wo liegt die Ursache, welche
