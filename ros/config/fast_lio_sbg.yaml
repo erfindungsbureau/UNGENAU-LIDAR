@@ -18,10 +18,10 @@ mapping:
     fov_degree:    180
     det_range:     50.0
     extrinsic_est_en: false
-    extrinsic_T: [ 0.0, 0.0, 0.0 ]
-    extrinsic_R: [1, 0, 0,
-                  0, 1, 0,
-                  0, 0, 1]
+    extrinsic_T: [ 0.000, 0.030, -0.0249 ]
+    extrinsic_R: [0.9973, 0.0064, 0.0730,
+                  0.0000, 0.9962, -0.0872,
+                  -0.0732, 0.0869, 0.9935]
 
 publish:
     path_en:  true

@@ -238,6 +238,30 @@ else-Zweig und laeuft mit MP_PROC_NUM=1 (single-threaded), unabhaengig von Kerna
       nicht weiter untersucht (evtl. NVIDIA-eigene Kernreservierung), koennte bei weiterer
       Performance-Optimierung relevant werden.
 
+## Extrinsik-Kalibrierung nachgetragen (FAST-LIO2 + LIO-SAM)
+
+Befund: WEDER fast_lio_sbg.yaml NOCH lio_sam_params.yaml hatten je die gemessene
+SBG<->Ouster-Extrinsik (Roll 5deg, Pitch 4.2deg, Translation ~30mm) angewendet -- beide nutzten
+Identitaet trotz vorhandener Kalibrierungsdaten in jetson-setup.md. Zusatzbefund: die in
+jetson-setup.md dokumentierte extrinsicRPY-Notation (3 Winkel) war falsch -- LIO-SAMs Code
+erwartet eine 3x3-Matrix (9 Werte), keine 3 Euler-Winkel.
+
+- [x] Datum: 2026-06-30
+- [x] Fix angewendet: extrinsic_T/extrinsic_R (FAST-LIO2) bzw. extrinsicTrans/extrinsicRot/
+      extrinsicRPY (LIO-SAM) auf die gemessenen Werte gesetzt.
+- [x] **FAST-LIO2 Test:** Keine Verbesserung. Weiterhin eingefroren (9.7mm/45s trotz 173 Grad
+      Yaw-Drehung laut SBG). Sauberer Lauf, keine Fehler/Warnungen im Log.
+- [x] **LIO-SAM Test:** Weiterhin stark divergent, aber andere Groessenordnung als zuvor
+      (Bounding-Box jetzt 590x553x630m statt vorher Tausende -- weiterhin physikalisch
+      unplausibel fuer einen Innenraum-Scan).
+- [x] **Schlussfolgerung: Extrinsik-Kalibrierung war ein echter, aber nicht der entscheidende
+      Fehler.** Beide Engines scheitern weiterhin an denselben Rohdaten, nur in entgegengesetzte
+      Richtungen (FAST-LIO2 zu konservativ/eingefroren, LIO-SAM zu instabil/divergent) -- dieses
+      Muster deutet eher auf ein Problem in den Rohdaten selbst waehrend Bewegung hin
+      (Motion-Distortion-Kompensation, Zeitsynchronisation LiDAR<->IMU) als auf
+      Algorithmus-Tuning. Naechster Test: einzelne Rohscans waehrend Bewegung visuell pruefen ob
+      Kanten/Waende innerhalb eines einzelnen 360-Grad-Sweeps (~100ms) bereits verzogen wirken.
+
 ## Ergebnis-Zusammenfassung
 
 (Nach Abschluss aller Stufen hier eintragen: wo liegt die Ursache, welche

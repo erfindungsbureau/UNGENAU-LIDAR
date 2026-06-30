@@ -42,9 +42,9 @@ lio_sam:
   # SBG NED: X=vor, Y=rechts, Z=unten
   # Nach NED->ENU Konverter: X=vor, Y=links, Z=oben → identisch mit Ouster
   # → Identitätsmatrix
-  extrinsicTrans: [0.0, 0.0, 0.0]
-  extrinsicRot: [1, 0, 0, 0, 1, 0, 0, 0, 1]
-  extrinsicRPY: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  extrinsicTrans: [0.000, 0.030, -0.0249]
+  extrinsicRot: [0.9973, 0.0064, 0.0730, 0.0000, 0.9962, -0.0872, -0.0732, 0.0869, 0.9935]
+  extrinsicRPY: [0.9973, 0.0064, 0.0730, 0.0000, 0.9962, -0.0872, -0.0732, 0.0869, 0.9935]
 
   # LOAM feature threshold
   edgeThreshold: 1.0
