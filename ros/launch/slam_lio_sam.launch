@@ -4,7 +4,7 @@
   <!-- sbg_driver wird via start_lidar.sh gestartet, hier nicht nochmal launchen -->
 
   <!-- LIO-SAM Parameter -->
-  <rosparam file="$(find lio_sam)/config/params.yaml" command="load"/>
+  <rosparam file="/home/nvidia/UNGENAU-LIDAR/ros/config/lio_sam_params.yaml" command="load"/>
   <param name="lio_sam/imuTopic" value="/imu/data"/>
 
   <!-- LIO-SAM Nodes -->
@@ -14,6 +14,6 @@
   <node pkg="lio_sam" type="lio_sam_mapOptmization"     name="lio_sam_mapOptmization"     output="screen" respawn="true"/>
 
   <!-- TF -->
-  <param name="robot_description" textfile="/home/nvidia/robot.urdf"/>
+  <param name="robot_description" textfile="/home/nvidia/UNGENAU-LIDAR/ros/robot.urdf"/>
   <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen" respawn="true"/>
 </launch>

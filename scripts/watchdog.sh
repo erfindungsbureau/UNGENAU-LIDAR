@@ -8,7 +8,7 @@ log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a $LOG; }
 
 start_bridge() {
     log "BRIDGE: Starte bridge.py..."
-    nohup bash -c "$ROS_ENV && python2 /home/nvidia/bridge.py" > /tmp/bridge.log 2>&1 &
+    nohup bash -c "$ROS_ENV && python2 /home/nvidia/UNGENAU-LIDAR/scripts/bridge.py" > /tmp/bridge.log 2>&1 &
     sleep 5
     pgrep -f "python2.*bridge.py" > /dev/null && log "BRIDGE: OK" || log "BRIDGE: WARNUNG"
 }
@@ -17,7 +17,7 @@ start_sbg_driver() {
     log "SBG_DRIVER: Starte sbg_driver + combiner..."
     nohup bash -c "$ROS_ENV && roslaunch sbg_driver sbg_device.launch" > /tmp/sbg_driver.log 2>&1 &
     sleep 5
-    nohup bash -c "$ROS_ENV && python /home/nvidia/sbg_imu_combiner.py" > /tmp/sbg_combiner.log 2>&1 &
+    nohup bash -c "$ROS_ENV && python /home/nvidia/UNGENAU-LIDAR/scripts/sbg_imu_combiner.py" > /tmp/sbg_combiner.log 2>&1 &
     sleep 2
     pgrep -f "sbg_device" > /dev/null && log "SBG_DRIVER: OK" || log "SBG_DRIVER: WARNUNG"
     pgrep -f "sbg_imu_combiner" > /dev/null && log "SBG_COMBINER: OK" || log "SBG_COMBINER: WARNUNG"
@@ -35,7 +35,7 @@ while true; do
         pgrep -f "sbg_imu_combiner" > /dev/null || {
             pgrep -f "sbg_device" > /dev/null && {
                 log "SBG_COMBINER: Prozess weg! Neustart..."
-                nohup bash -c "$ROS_ENV && python /home/nvidia/sbg_imu_combiner.py" > /tmp/sbg_combiner.log 2>&1 &
+                nohup bash -c "$ROS_ENV && python /home/nvidia/UNGENAU-LIDAR/scripts/sbg_imu_combiner.py" > /tmp/sbg_combiner.log 2>&1 &
             }
         }
     fi

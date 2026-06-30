@@ -1,0 +1,40 @@
+# Stufe 1 des SLAM-Testprotokolls (docs/slam-staged-testing.md):
+# FAST-LIO2 mit der IM LIDAR INTEGRIERTEN Ouster-IMU statt der externen SBG Ellipse 2.
+# Einziger Unterschied zu fast_lio_sbg.yaml: imu_topic.
+# extrinsic_T/R bleiben bei 0/Identität, da die Ouster-IMU werkseitig im selben
+# Gehäuse wie der LiDAR sitzt (keine separate Extrinsik-Kalibrierung nötig).
+
+common:
+    lid_topic:  "/ouster/points"
+    imu_topic:  "/ouster/imu"
+    time_sync_en: false
+    time_offset_lidar_to_imu: 0.0
+
+preprocess:
+    lidar_type: 3
+    scan_line: 64
+    timestamp_unit: 3
+    blind: 1.0
+
+mapping:
+    acc_cov: 0.001
+    gyr_cov: 0.0001
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.000001
+    fov_degree:    180
+    det_range:     50.0
+    extrinsic_est_en: false
+    extrinsic_T: [ 0.0, 0.0, 0.0 ]
+    extrinsic_R: [1, 0, 0,
+                  0, 1, 0,
+                  0, 0, 1]
+
+publish:
+    path_en:  true
+    scan_publish_en:  true
+    dense_publish_en: true
+    scan_bodyframe_pub_en: false
+
+pcd_save:
+    pcd_save_en: true
+    interval: -1

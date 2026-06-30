@@ -1,0 +1,27 @@
+<launch>
+  <!-- Relay: /sbg/imu_enu (NED->ENU konvertiert) -> Madgwick Eingang -->
+  <node pkg="topic_tools" type="relay" name="imu_relay"
+        args="/sbg/imu_enu /imu/data_raw" output="screen" respawn="true"/>
+
+  <!-- Madgwick Filter: world_frame enu korrekt (SBG jetzt ENU-konform: az=+9.8) -->
+  <node pkg="imu_filter_madgwick" type="imu_filter_node" name="imu_filter" output="screen" respawn="true">
+    <param name="use_mag"     value="false"/>
+    <param name="publish_tf"  value="false"/>
+    <param name="world_frame" value="enu"/>
+    <param name="gain"        value="0.01"/>
+  </node>
+
+  <!-- LIO-SAM Parameter -->
+  <rosparam file="$(find lio_sam)/config/params.yaml" command="load"/>
+  <param name="lio_sam/imuTopic" value="/imu/data"/>
+
+  <!-- LIO-SAM Nodes -->
+  <node pkg="lio_sam" type="lio_sam_imuPreintegration"  name="lio_sam_imuPreintegration"  output="screen" respawn="true"/>
+  <node pkg="lio_sam" type="lio_sam_imageProjection"    name="lio_sam_imageProjection"    output="screen" respawn="true"/>
+  <node pkg="lio_sam" type="lio_sam_featureExtraction"  name="lio_sam_featureExtraction"  output="screen" respawn="true"/>
+  <node pkg="lio_sam" type="lio_sam_mapOptmization"     name="lio_sam_mapOptmization"     output="screen" respawn="true"/>
+
+  <!-- TF -->
+  <param name="robot_description" textfile="/home/nvidia/robot.urdf"/>
+  <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen" respawn="true"/>
+</launch>

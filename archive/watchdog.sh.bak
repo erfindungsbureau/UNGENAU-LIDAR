@@ -1,0 +1,34 @@
+#!/bin/bash
+# Watchdog: überwacht bridge.py und sbg_ned_to_enu.py
+
+LOG=/tmp/watchdog.log
+ROS_ENV="source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash"
+
+log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a $LOG; }
+
+start_bridge() {
+    log "BRIDGE: Starte bridge.py..."
+    nohup bash -c "$ROS_ENV && python2 /home/nvidia/bridge.py" > /tmp/bridge.log 2>&1 &
+    sleep 5
+    pgrep -f "python2.*bridge.py" > /dev/null && log "BRIDGE: OK" || log "BRIDGE: WARNUNG"
+}
+
+start_sbg_enu() {
+    log "SBG_ENU: Starte sbg_ned_to_enu.py..."
+    nohup bash -c "$ROS_ENV && python /home/nvidia/sbg_ned_to_enu.py" > /tmp/sbg_enu.log 2>&1 &
+    sleep 3
+    pgrep -f "sbg_ned_to_enu" > /dev/null && log "SBG_ENU: OK" || log "SBG_ENU: WARNUNG"
+}
+
+log "=== Watchdog gestartet ==="
+
+pgrep -f "python2.*bridge.py" > /dev/null   || start_bridge
+pgrep -f "sbg_ned_to_enu"     > /dev/null   || ([ -e /dev/ttyUSB0 ] && start_sbg_enu)
+
+while true; do
+    pgrep -f "python2.*bridge.py" > /dev/null || { log "BRIDGE: Prozess weg!"; start_bridge; }
+    if [ -e /dev/ttyUSB0 ]; then
+        pgrep -f "sbg_ned_to_enu" > /dev/null || { log "SBG_ENU: Prozess weg!"; start_sbg_enu; }
+    fi
+    sleep 30
+done

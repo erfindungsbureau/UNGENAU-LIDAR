@@ -1,170 +1,1000 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
-<meta charset="UTF-8">
-<title>LiDAR Live</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-#canvas { display: block; position: fixed; top: 0; left: 0; }
-#info {
-  position: fixed; top: 10px; right: 10px;
-  background: rgba(0,0,0,0.85); padding: 15px;
-  border: 1px solid #0f0; color: #0f0;
-  font-family: monospace; font-size: 13px;
-  min-width: 200px;
-}
-.ok { color: #0f0; } .warn { color: #f80; } .err { color: #f00; }
-h2 { font-size: 14px; margin-bottom: 10px; color: #4fc3f7; border-bottom: 1px solid #333; padding-bottom: 5px; }
-.row { display: flex; justify-content: space-between; margin: 4px 0; }
-.val { color: #4fc3f7; font-weight: bold; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>LiDAR Scanner</title>
+  <style>
+    :root {
+      --c-bg:    #060e14;
+      --c-panel: rgba(6,14,20,.96);
+      --c-border:#1e3a4a;
+      --c-blue:  #4fc3f7;
+      --c-green: #4caf50;
+      --c-warn:  #ff9800;
+      --c-red:   #f44336;
+      --c-muted: #607d8b;
+      --c-dim:   #0d1a24;
+      --r:       8px;
+      --font:    "SF Mono","Courier New",monospace;
+    }
+    *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{width:100%;height:100%;background:var(--c-bg);color:#e0e0e0;font-family:var(--font);overflow:hidden}
+
+    /* ── Layout ── */
+    #app{display:flex;flex-direction:column;height:100%;max-width:480px;margin:0 auto;padding:env(safe-area-inset-top,12px) 12px env(safe-area-inset-bottom,12px);gap:8px}
+
+    /* ── Panels ── */
+    .panel{background:var(--c-panel);border:1px solid var(--c-border);border-radius:var(--r);padding:12px 14px}
+    .panel-title{font-size:11px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+
+    /* ── Scan-Bereit Banner ── */
+    #ready-banner{border-radius:var(--r);padding:10px 14px;transition:background .3s,border-color .3s}
+    #ready-banner.ready    {background:rgba(76,175,80,.12);border:1px solid var(--c-green)}
+    #ready-banner.not-ready{background:rgba(244,67,54,.08);border:1px solid var(--c-red)}
+    #ready-banner.checking {background:rgba(79,195,247,.06);border:1px solid var(--c-border)}
+    #ready-title{font-size:14px;font-weight:700;margin-bottom:6px}
+    .chk-row{display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0}
+    .chk-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .3s}
+
+    /* ── IMU ── */
+    #imu-panel .imu-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+    .imu-cell{background:var(--c-dim);border-radius:6px;padding:8px 6px;text-align:center}
+    .imu-label{font-size:10px;color:var(--c-muted);margin-bottom:2px}
+    .imu-val{font-size:16px;color:var(--c-blue);font-weight:700}
+
+    /* ── Action Buttons ── */
+    #actions{display:flex;gap:8px}
+    .act-btn{flex:1;min-height:52px;border-radius:var(--r);border:1px solid var(--c-border);background:rgba(79,195,247,.06);color:var(--c-blue);font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px}
+    .act-btn.on{border-color:var(--c-green);color:var(--c-green);background:rgba(76,175,80,.1)}
+    .act-btn.danger{border-color:var(--c-red);color:var(--c-red);background:rgba(244,67,54,.06)}
+    .act-btn:active{opacity:.65;transform:scale(.97)}
+    .act-btn:disabled{opacity:.35;cursor:not-allowed}
+
+    /* ── Big SCAN Button ── */
+    #scan-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+    #rec-btn{width:100%;min-height:72px;border-radius:var(--r);border:2px solid var(--c-red);background:rgba(244,67,54,.08);color:var(--c-red);font-family:var(--font);font-size:18px;font-weight:800;letter-spacing:.04em;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:10px}
+    #rec-btn .dot{width:16px;height:16px;border-radius:50%;background:var(--c-red);transition:all .2s;flex-shrink:0}
+    #rec-btn.recording{border-color:#ff1744;background:rgba(244,67,54,.2);box-shadow:0 0 24px rgba(244,67,54,.3)}
+    #rec-btn.recording .dot{border-radius:3px;background:#ff1744}
+    #rec-btn.not-ready{border-color:#2a3a44;background:rgba(255,255,255,.02);color:#2a3a44;cursor:not-allowed}
+    #rec-btn.not-ready .dot{background:#2a3a44}
+    #rec-btn:active:not(.not-ready){transform:scale(.98);opacity:.8}
+    #rec-timer{font-size:13px;color:var(--c-warn);letter-spacing:.05em;min-height:18px}
+
+    /* ── System Panel ── */
+    #sys-panel .sys-row{display:flex;justify-content:space-between;font-size:12px;margin:3px 0}
+    .sys-val{color:var(--c-blue);font-weight:600}
+    .bar-bg{background:var(--c-dim);border-radius:3px;height:4px;margin:4px 0 8px}
+    .bar-fg{height:4px;border-radius:3px;background:var(--c-blue);transition:width .5s}
+    #cpu-bars{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin:4px 0 6px}
+    .cpu-bar-wrap{display:flex;flex-direction:column;align-items:center;gap:2px}
+    .cpu-bar-track{width:100%;height:28px;background:var(--c-dim);border-radius:2px;position:relative;overflow:hidden}
+    .cpu-bar-fill{position:absolute;bottom:0;width:100%;transition:height .5s}
+    .cpu-bar-label{font-size:9px;color:var(--c-muted)}
+    .cpu-bar-pct{font-size:9px}
+
+    /* ── Recording overlay (top) ── */
+    #rec-overlay{display:none;background:rgba(244,67,54,.1);border:1px solid var(--c-red);border-radius:var(--r);padding:10px 14px}
+    #rec-overlay.show{display:block}
+    #rec-overlay .ro-head{font-size:12px;color:var(--c-red);font-weight:700;animation:blink 1s infinite;margin-bottom:4px}
+    @keyframes blink{50%{opacity:.35}}
+    .ro-row{display:flex;justify-content:space-between;font-size:12px}
+    .ro-lbl{color:var(--c-muted)}
+    .ro-val{color:var(--c-red);font-weight:600}
+
+    /* ── Drawer (Scan-Liste) ── */
+    #drawer{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;z-index:20;background:var(--c-bg);border-top:1px solid var(--c-border);transform:translateY(calc(100% - 48px));transition:transform .28s cubic-bezier(.4,0,.2,1)}
+    #drawer.open{transform:translateY(0)}
+    #drw-handle{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;cursor:pointer;user-select:none}
+    #drw-handle span{font-size:13px;color:var(--c-blue)}
+    #drw-body{max-height:55vh;overflow-y:auto;padding:4px 12px 20px;-webkit-overflow-scrolling:touch}
+    #drw-empty{color:var(--c-muted);font-size:12px;padding:16px 0;text-align:center}
+    .bag-row{padding:10px 0;border-bottom:1px solid var(--c-dim)}
+    .bag-name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px}
+    .bag-meta{font-size:11px;color:var(--c-muted);margin-bottom:6px}
+    .bag-actions{display:flex;gap:6px}
+    .bbtn{flex:1;min-height:40px;border-radius:6px;border:1px solid var(--c-border);background:rgba(79,195,247,.06);color:var(--c-blue);font-size:12px;font-family:var(--font);cursor:pointer}
+    .bbtn:active{opacity:.6}
+    .b-rm{border-color:#3a1a1a;color:var(--c-red);background:rgba(244,67,54,.06)}
+    .b-ex{border-color:#3a2a10;color:var(--c-warn);background:rgba(255,152,0,.06)}
+
+    /* ── Overlays ── */
+    .ov{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.82);display:none;align-items:flex-end;justify-content:center;padding-bottom:env(safe-area-inset-bottom,0)}
+    .ov.show{display:flex}
+    .sheet{background:#0a1620;border:1px solid var(--c-border);border-radius:14px 14px 0 0;padding:20px 16px 28px;width:100%;max-width:480px}
+    .sheet h3{font-size:15px;color:var(--c-blue);margin-bottom:14px;text-align:center}
+    .s-row{font-size:12px;display:flex;gap:8px;margin:4px 0;align-items:baseline}
+    .s-val{color:var(--c-blue);font-weight:600}
+    .s-file{font-size:10px;color:var(--c-muted);word-break:break-all}
+    .minp{width:100%;padding:12px;background:var(--c-dim);border:1px solid var(--c-border);border-radius:8px;color:#e0e0e0;font-family:var(--font);font-size:15px;margin:10px 0 16px;-webkit-appearance:none}
+    .mbtns{display:flex;gap:10px}
+    .bp{flex:1;min-height:48px;background:rgba(79,195,247,.15);color:var(--c-blue);border:1px solid var(--c-blue);border-radius:8px;cursor:pointer;font-family:var(--font);font-size:14px;font-weight:600}
+    .bs{flex:1;min-height:48px;background:rgba(255,255,255,.06);color:#aaa;border:1px solid #333;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:14px}
+    .bd{flex:1;min-height:48px;background:rgba(244,67,54,.2);color:var(--c-red);border:1px solid var(--c-red);border-radius:8px;cursor:pointer;font-family:var(--font);font-size:14px;font-weight:600}
+    .mbtns button:active{opacity:.65}
+    .msep{border:none;border-top:1px solid var(--c-border);margin:12px 0}
+    #exp-progress{font-size:12px;color:var(--c-warn);margin:6px 0}
+    .prog-wrap{background:var(--c-dim);border-radius:3px;height:4px;margin:6px 0 14px}
+    .prog-fill{height:4px;border-radius:3px;background:var(--c-warn);width:0%;transition:width .4s}
+
+    /* ── Hold-Still Overlay ── */
+    #hold-ov{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px}
+    #hold-ov.show{display:flex}
+    #hold-count{font-size:96px;font-weight:900;line-height:1;transition:color .3s}
+    #hold-title{font-size:22px;font-weight:800;letter-spacing:.08em;text-align:center}
+    #hold-sub{font-size:13px;color:var(--c-muted);text-align:center;max-width:260px;line-height:1.5}
+    #hold-ring{width:130px;height:130px;position:relative;margin-bottom:8px}
+    #hold-ring svg{transform:rotate(-90deg)}
+    #hold-ring circle{fill:none;stroke-width:6;stroke-linecap:round}
+    .ring-bg{stroke:#1e3a4a}
+    .ring-fg{stroke:var(--c-warn);stroke-dasharray:339.3;stroke-dashoffset:0;transition:stroke-dashoffset .9s linear,stroke .3s}
+    #hold-cancel{margin-top:8px;padding:10px 28px;border-radius:8px;border:1px solid #333;background:rgba(255,255,255,.06);color:#aaa;font-family:var(--font);font-size:14px;cursor:pointer}
+    #hold-cancel:active{opacity:.6}
+    #lidar-pwr-btn{background:rgba(0,255,80,.12);color:#00ff50;border-color:#00ff50}
+    #lidar-pwr-btn.off{background:rgba(255,60,60,.12);color:#ff3c3c;border-color:#ff3c3c}
+    /* USB */
+    #usb-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid #333;color:var(--c-muted);background:rgba(255,255,255,.04);transition:all .3s}
+    #usb-chip.connected{border-color:#00b464;color:#00b464;background:rgba(0,180,100,.1)}
+    #usb-chip.copying{border-color:var(--c-warn);color:var(--c-warn);background:rgba(255,180,0,.1);animation:pulse 1s infinite}
+    .bbtn.b-usb{background:rgba(0,180,100,.12);color:#00b464;border-color:#00b464;opacity:.35;pointer-events:none}
+    .bbtn.b-usb.usb-on{opacity:1;pointer-events:auto}
+    #usb-progress-bar{height:3px;background:var(--c-warn);width:0%;transition:width .3s;border-radius:2px;margin-top:4px}
+    /* IMU Diagnose Bars */
+    .imu-bar-row{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:11px}
+    .imu-bar-lbl{width:24px;color:var(--c-muted);flex-shrink:0;text-align:right}
+    .imu-bar-track{flex:1;height:8px;background:#0d1a24;border-radius:4px;overflow:hidden;position:relative}
+    .imu-bar-fill{height:100%;border-radius:4px;position:absolute;transition:width .1s,left .1s}
+    .imu-bar-val{width:52px;text-align:right;color:#ccc;flex-shrink:0}
+    .imu-section{font-size:10px;color:var(--c-muted);margin:6px 0 2px;font-weight:600;letter-spacing:.05em}
+
+    /* Prozess-Monitor */
+    #proc-panel{margin-top:8px;display:none}
+    #proc-panel.show{display:block}
+    .proc-title{font-size:11px;color:var(--c-muted);font-weight:600;letter-spacing:.05em;margin-bottom:4px;border-top:1px solid #1e2e38;padding-top:6px}
+    .proc-row{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #0d1a24;font-size:11px}
+    .proc-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--c-warn)}
+    .proc-stat{color:var(--c-muted);white-space:nowrap}
+    .proc-kill{background:rgba(255,60,60,.15);border:1px solid #ff3c3c;color:#ff3c3c;border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;flex-shrink:0}
+    .proc-kill:active{opacity:.6}
+  </style>
 </head>
 <body>
-<canvas id="canvas"></canvas>
-<div id="info">
-  <h2>LiDAR Live</h2>
-  <div class="row">ROS: <span id="ros_status" class="warn">connecting...</span></div>
-  <div class="row">Points: <span id="pts" class="val">0</span></div>
-  <div class="row">Rate: <span id="rate" class="val">0 Hz</span></div>
-  <hr style="border-color: #333; margin: 8px 0;">
-  <div class="row">Roll: <span id="roll" class="val">0°</span></div>
-  <div class="row">Pitch: <span id="pitch" class="val">0°</span></div>
-  <div class="row">Yaw: <span id="yaw" class="val">0°</span></div>
-  <hr style="border-color: #333; margin: 8px 0;">
-  <div style="font-size: 11px; color: #666;">
-    Drag: rotate<br>
-    Scroll: zoom
+<div id="app">
+
+  <!-- Aufnahme läuft -->
+  <div id="rec-overlay">
+    <div class="ro-head">● AUFNAHME LÄUFT</div>
+    <div class="ro-row"><span class="ro-lbl">Zeit</span><span class="ro-val" id="ss-dur">00:00</span></div>
+    <div class="ro-row"><span class="ro-lbl">Grösse</span><span class="ro-val" id="ss-mb">— MB</span></div>
+  </div>
+
+  <!-- Scan-Bereit Banner -->
+  <div id="ready-banner" class="checking">
+    <div id="ready-title" style="color:var(--c-muted)">Prüfe Status…</div>
+    <div class="chk-row"><div class="chk-dot" id="dot-lidar" style="background:#2a3a44"></div><span id="lbl-lidar" style="color:var(--c-muted)">LiDAR</span></div>
+    <div class="chk-row"><div class="chk-dot" id="dot-imu"   style="background:#2a3a44"></div><span id="lbl-imu"   style="color:var(--c-muted)">IMU</span></div>
+    <div class="chk-row"><div class="chk-dot" id="dot-slam"  style="background:#2a3a44"></div><span id="lbl-slam"  style="color:var(--c-muted)">SLAM</span></div>
+  </div>
+
+  <!-- IMU -->
+  <div id="imu-panel" class="panel">
+    <div class="panel-title">Orientierung</div>
+    <div class="imu-grid">
+      <div class="imu-cell"><div class="imu-label">Roll</div><div class="imu-val" id="roll">—°</div></div>
+      <div class="imu-cell"><div class="imu-label">Pitch</div><div class="imu-val" id="pitch">—°</div></div>
+      <div class="imu-cell"><div class="imu-label">Yaw</div><div class="imu-val" id="yaw">—°</div></div>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
+  <div id="actions" style="display:block">
+    <div style="display:flex;gap:4px;margin-bottom:6px">
+      <button id="eng-lio" onclick="setEngine('lio_sam')" style="flex:1;padding:5px 2px;font-family:var(--font);font-size:11px;border-radius:var(--r);border:1px solid var(--c-green);background:rgba(76,175,80,.15);color:var(--c-green);cursor:pointer">LIO-SAM</button>
+      <button id="eng-flio" onclick="setEngine('fast_lio')" style="flex:1;padding:5px 2px;font-family:var(--font);font-size:11px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:var(--c-muted);cursor:pointer">FAST-LIO2</button>
+    </div>
+    <button class="act-btn" id="arm-btn" onclick="toggleArm()" style="width:100%">⚙ ARM</button>
+    <div style="text-align:center;margin-top:6px">
+      <button onclick="toggleDiag()" style="background:none;border:none;color:var(--c-muted);font-size:11px;cursor:pointer;text-decoration:underline">⬡ Diagnose</button>
+    </div>
+  </div>
+
+  <!-- SCAN Button -->
+  <div id="scan-wrap">
+    <div id="rec-timer"></div>
+    <button id="rec-btn" class="not-ready" onclick="toggleRec()">
+      <div class="dot"></div>
+      <span id="rec-lbl">SCAN</span>
+    </button>
+  </div>
+
+  <!-- Diagnose Panel -->
+  <div id="diag-panel" class="panel" style="display:none">
+    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Diagnose</span>
+      <button onclick="toggleDiag()" style="background:none;border:none;color:var(--c-muted);font-size:12px;cursor:pointer">✕ schliessen</button>
+    </div>
+    <canvas id="scan-canvas" width="320" height="360" style="width:100%;border-radius:6px;background:#050e14;display:block"></canvas>
+    <div style="font-size:10px;color:var(--c-muted);text-align:center;margin-top:2px" id="scan-pts-count">— Punkte</div>
+  </div>
+
+  <!-- System -->
+  <div id="sys-panel" class="panel">
+    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>System</span>
+      <span id="usb-chip">⏏ kein USB</span>
+    </div>
+    <div id="usb-progress-bar"></div>
+    <div class="sys-row">SSD <span id="sys-disk" class="sys-val">—</span></div>
+    <div class="bar-bg"><div class="bar-fg" id="disk-bar" style="width:0%"></div></div>
+    <div class="sys-row" style="margin-bottom:4px">CPU <span id="sys-cpu" class="sys-val">—</span> &nbsp; Temp <span id="sys-temp" class="sys-val">—</span></div>
+    <div id="cpu-bars"></div>
+    <div id="proc-panel">
+      <div class="proc-title">KONVERTIERUNGEN</div>
+      <div id="proc-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Scan-Liste Drawer -->
+<div id="drawer">
+  <div id="drw-handle" onclick="toggleDrawer()">
+    <span>📁 SCANS (<span id="bag-cnt">0</span>)</span>
+    <span id="drw-arrow">▼</span>
+  </div>
+  <div id="drw-body"><div id="drw-empty">Keine Scans vorhanden</div></div>
+</div>
+
+<!-- Overlays -->
+<div id="save-ov" class="ov">
+  <div class="sheet">
+    <h3>💾 Scan speichern?</h3>
+    <div class="s-row">Dauer: <span id="s-dur" class="s-val">—</span></div>
+    <div class="s-row">Grösse: <span id="s-size" class="s-val">—</span></div>
+    <div class="s-file" id="s-file">—</div>
+    <input id="s-name" class="minp" type="text" placeholder="Scan-Name…" autocomplete="off" autocorrect="off">
+    <div class="mbtns">
+      <button class="bd" onclick="discardRec()">🗑 Löschen</button>
+      <button class="bp" onclick="saveRec()">💾 Speichern</button>
+    </div>
   </div>
 </div>
 
-<script src="/static/three.min.js"></script>
-<script src="/static/roslib.min.js"></script>
+<div id="ren-ov" class="ov">
+  <div class="sheet">
+    <h3>✏ Umbenennen</h3>
+    <input id="ren-name" class="minp" type="text" placeholder="Neuer Name…" autocomplete="off" autocorrect="off">
+    <div class="mbtns">
+      <button class="bs" onclick="closeOv('ren-ov')">Abbrechen</button>
+      <button class="bp" onclick="doRename()">Umbenennen</button>
+    </div>
+  </div>
+</div>
+
+<div id="exp-ov" class="ov">
+  <div class="sheet">
+    <h3>📦 Export XYZ</h3>
+    <div class="s-row">Datei: <span id="exp-file" class="s-val">—</span></div>
+    <div class="s-file">XYZ → ArchiCAD · CloudCompare · Rhino</div>
+    <div id="exp-progress" style="margin-top:10px">Konvertierung läuft…</div>
+    <div class="prog-wrap"><div class="prog-fill" id="exp-bar"></div></div>
+    <div class="mbtns">
+      <button class="bs" onclick="cancelExport()">Abbrechen</button>
+      <button class="bp" id="exp-dl-btn" onclick="dlExport()" disabled style="opacity:.35">↓ Download</button>
+    </div>
+  </div>
+</div>
+
 <script>
-const canvas = document.getElementById("canvas");
+// ── Status-Polling ────────────────────────────────────────────────────────────
+let scanReady = false, slamOn = false, currentArmState = 'disarmed';
 
-// Three.js
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 10000);
-camera.position.set(0, 10, 30);
-camera.lookAt(0, 0, 0);
+function setChk(dotId, lblId, ok, label) {
+  const dot = document.getElementById(dotId);
+  const lbl = document.getElementById(lblId);
+  dot.style.background = ok ? 'var(--c-green)' : 'var(--c-red)';
+  lbl.textContent = label + (ok ? ' ✓' : ' ✗');
+  lbl.style.color = ok ? 'var(--c-green)' : 'var(--c-red)';
+}
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
+function updateArmBtn(armState, secsLeft) {
+  const btn = document.getElementById('arm-btn');
+  currentArmState = armState;
+  if (armState === 'armed') {
+    const label = (secsLeft !== null && secsLeft !== undefined) ? '⏹ DISARM (' + secsLeft + 's)' : '⏹ DISARM';
+    btn.textContent = label;
+    btn.style.background = 'rgba(244,67,54,.18)';
+    btn.style.color = 'var(--c-red)';
+    btn.style.borderColor = 'var(--c-red)';
+    btn.disabled = false;
+  } else if (armState === 'arming') {
+    btn.textContent = '✕ ABBRECHEN';
+    btn.style.background = 'rgba(255,152,0,.12)';
+    btn.style.color = 'var(--c-warn)';
+    btn.style.borderColor = 'var(--c-warn)';
+    btn.disabled = false;
+  } else if (armState === 'disarming') {
+    btn.textContent = '⏳ DISARMING…';
+    btn.style.background = 'rgba(255,152,0,.12)';
+    btn.style.color = 'var(--c-warn)';
+    btn.style.borderColor = 'var(--c-warn)';
+    btn.disabled = true;
+  } else {
+    btn.textContent = '⚙ ARM';
+    btn.style.background = 'rgba(79,195,247,.1)';
+    btn.style.color = 'var(--c-blue)';
+    btn.style.borderColor = 'var(--c-blue)';
+    btn.disabled = false;
+  }
+}
 
-// Grid + Axes
-scene.add(new THREE.GridHelper(100, 100, 0x333333, 0x111111));
-scene.add(new THREE.AxesHelper(5));
-scene.add(new THREE.AmbientLight(0x404040));
+function updateBanner(lidar, imu, slam, armState) {
+  setChk('dot-lidar', 'lbl-lidar', lidar, 'LiDAR');
+  setChk('dot-imu',   'lbl-imu',   imu,   'IMU');
+  setChk('dot-slam',  'lbl-slam',  slam,  'SLAM');
+  const ready = lidar && imu && slam && armState === 'armed';
+  scanReady = ready;
+  const b = document.getElementById('ready-banner');
+  const t = document.getElementById('ready-title');
+  b.className = ready ? 'ready' : 'not-ready';
+  t.textContent = ready ? '▶ BEREIT ZUM SCANNEN' : '⚠ NICHT BEREIT';
+  t.style.color = ready ? 'var(--c-green)' : 'var(--c-red)';
+  if (!isRec) {
+    const btn = document.getElementById('rec-btn');
+    btn.className = ready ? '' : 'not-ready';
+  }
+}
 
-// Point cloud
-let ptGeom = new THREE.BufferGeometry();
-let ptMat = new THREE.PointsMaterial({ color: 0x00ff88, size: 0.08, sizeAttenuation: true });
-let ptCloud = new THREE.Points(ptGeom, ptMat);
-scene.add(ptCloud);
+setInterval(async () => {
+  try {
+    const d = await fetch('/api/status').then(r => r.json());
+    updateBanner(!!d.lidar, !!d.imu, !!d.slam_active, d.arm_state || 'disarmed');
+    updateArmBtn(d.arm_state || 'disarmed', d.arm_secs_left);
+    slamOn = !!d.slam;
+  } catch(e) {}
+}, 2000);
 
-// Mouse controls
-let isDragging = false, prevMouse = {x:0,y:0};
-canvas.addEventListener("mousedown", e => { isDragging=true; prevMouse={x:e.clientX,y:e.clientY}; });
-canvas.addEventListener("mouseup", () => isDragging=false);
-canvas.addEventListener("mousemove", e => {
-  if (!isDragging) return;
-  const dx = e.clientX - prevMouse.x, dy = e.clientY - prevMouse.y;
-  const q = new THREE.Quaternion();
-  q.setFromAxisAngle(new THREE.Vector3(0,1,0), dx*0.01);
-  camera.position.applyQuaternion(q);
-  const right = new THREE.Vector3();
-  camera.getWorldDirection(right); right.cross(camera.up).normalize();
-  q.setFromAxisAngle(right, dy*0.01);
-  camera.position.applyQuaternion(q);
-  camera.lookAt(0,0,0);
-  prevMouse = {x:e.clientX, y:e.clientY};
-});
-canvas.addEventListener("wheel", e => {
-  e.preventDefault();
-  camera.position.multiplyScalar(e.deltaY > 0 ? 1.1 : 0.9);
-}, {passive: false});
+// ── IMU ───────────────────────────────────────────────────────────────────────
+setInterval(async () => {
+  try {
+    const d = await fetch('/api/imu').then(r => r.json());
+    document.getElementById('roll').textContent  = d.roll.toFixed(1) + '°';
+    document.getElementById('pitch').textContent = d.pitch.toFixed(1) + '°';
+    document.getElementById('yaw').textContent   = (d.yaw||0).toFixed(1) + '°';
+  } catch(e) {}
+}, 400);
 
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+// ── Sysinfo ───────────────────────────────────────────────────────────────────
+async function pollSys() {
+  try {
+    const d = await fetch('/api/sysinfo').then(r => r.json());
+    document.getElementById('sys-disk').textContent = d.disk_used_gb + ' / ' + d.disk_total_gb + ' GB';
+    document.getElementById('disk-bar').style.width = Math.min(d.disk_pct,100) + '%';
+    document.getElementById('disk-bar').style.background = d.disk_pct > 85 ? 'var(--c-red)' : 'var(--c-blue)';
+    document.getElementById('sys-cpu').textContent  = 'load ' + d.cpu_load;
+    document.getElementById('sys-temp').textContent = d.temp_c + ' °C';
+    const wrap = document.getElementById('cpu-bars');
+    if (d.cpu_per && d.cpu_per.length) {
+      wrap.innerHTML = d.cpu_per.map((pct, i) => {
+        const col = pct > 80 ? 'var(--c-red)' : pct > 50 ? 'var(--c-warn)' : 'var(--c-blue)';
+        return `<div class="cpu-bar-wrap">
+          <div class="cpu-bar-label">C${i}</div>
+          <div class="cpu-bar-track"><div class="cpu-bar-fill" style="height:${pct}%;background:${col}"></div></div>
+          <div class="cpu-bar-pct" style="color:${col}">${Math.round(pct)}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch(e) {}
+}
+// ── USB ──────────────────────────────────────────────────────────────────────
+let usbConnected = false;
+async function pollUSB() {
+  try {
+    const u = await fetch('/api/usb/status').then(r => r.json());
+    const chip = document.getElementById('usb-chip');
+    const bar  = document.getElementById('usb-progress-bar');
+    usbConnected = u.connected;
+    if (!u.connected) {
+      chip.className = ''; chip.textContent = '⏏ kein USB';
+      bar.style.width = '0%';
+    } else if (u.copy && u.copy.active) {
+      chip.className = 'copying';
+      const pct = u.copy.total > 0 ? Math.round(u.copy.copied / u.copy.total * 100) : 0;
+      chip.textContent = '⏏ ' + pct + '%';
+      bar.style.width = pct + '%';
+    } else if (u.copy && u.copy.done && !u.copy.error) {
+      chip.className = 'connected';
+      chip.textContent = '⏏ ' + (u.label || 'USB') + ' ✓';
+      bar.style.width = '100%';
+      setTimeout(() => { bar.style.width = '0%'; }, 3000);
+    } else {
+      chip.className = 'connected';
+      chip.textContent = '⏏ ' + (u.label || 'USB') + ' · ' + u.free_gb + 'GB frei';
+      bar.style.width = '0%';
+    }
+  } catch(e) {}
+}
+pollUSB();
+setInterval(pollUSB, 3000);
 
-// ROS
-const ros = new ROSLIB.Ros({ url: "ws://" + location.hostname + ":9090" });
-ros.on("connection", () => {
-  document.getElementById("ros_status").textContent = "connected";
-  document.getElementById("ros_status").className = "ok";
-  subscribeTopics();
-});
-ros.on("error", e => {
-  document.getElementById("ros_status").textContent = "error";
-  document.getElementById("ros_status").className = "err";
-});
-ros.on("close", () => {
-  document.getElementById("ros_status").textContent = "disconnected";
-  document.getElementById("ros_status").className = "warn";
-});
+async function copyToUsb(filename) {
+  const u = await fetch('/api/usb/status').then(r => r.json()).catch(() => ({}));
+  if (!u.connected) { showMsg('Kein USB-Stick erkannt', 3000); return; }
+  if (u.copy && u.copy.active) { showMsg('Kopiervorgang laeuft bereits', 3000); return; }
+  const d = await fetch('/api/usb/copy/' + encodeURIComponent(filename), {method:'POST'}).then(r => r.json()).catch(() => ({}));
+  if (!d.ok) { showMsg('USB Fehler: ' + (d.msg || '?'), 4000); return; }
+  showMsg('Kopiere ' + filename + ' auf USB...', 3000);
+  pollUSB();
+}
 
-let frameCount = 0, lastFpsTime = Date.now();
+async function pollProcs() {
+  try {
+    const procs = await fetch('/api/processes').then(r => r.json());
+    const panel = document.getElementById('proc-panel');
+    const list  = document.getElementById('proc-list');
+    if (!procs.length) {
+      panel.classList.remove('show');
+      return;
+    }
+    panel.classList.add('show');
+    list.innerHTML = procs.map(p => {
+      const label = p.hires ? 'HD' : 'XYZ';
+      const file  = p.bag || p.xyz || 'unbekannt';
+      const short = file.replace(/\.bag$|\.xyz$/,'').slice(0,20);
+      return `<div class="proc-row">
+        <div class="proc-name" title="${file}">${label} ${short}</div>
+        <div class="proc-stat">CPU ${p.cpu}% · ${p.elapsed}</div>
+        <button class="proc-kill" onclick="killProc(${p.pid})">✕</button>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
 
-function subscribeTopics() {
-  // Subscribe to IMU only via rosbridge (lightweight)
-  // Point cloud comes via Flask API (pre-processed, fast)
+async function killProc(pid) {
+  if (!confirm('Prozess ' + pid + ' beenden?')) return;
+  const d = await fetch('/api/processes/'+pid+'/kill',{method:'POST'}).then(r=>r.json());
+  if (d.ok) { showMsg('Prozess beendet', 2000); pollProcs(); }
+  else showMsg('Fehler: ' + d.msg, 4000);
+}
 
-  // Subscribe to IMU
-  const imuTopic = new ROSLIB.Topic({
-    ros: ros,
-    name: "/sbg/ekf_euler",
-    messageType: "sbg_driver/SbgEkfEuler"
+pollSys();
+pollProcs();
+setInterval(pollSys, 5000);
+setInterval(pollProcs, 3000);
+
+// ── Recording ─────────────────────────────────────────────────────────────────
+let curBag = null, recT0 = null, recIv = null, statusIv = null, isRec = false;
+let holdAbort = false;
+const fmt = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+
+async function toggleRec() {
+  if (isRec) { await stopRec(); } else { await startScanFlow(); }
+}
+
+function cancelScan() {
+  holdAbort = true;
+  document.getElementById('hold-ov').classList.remove('show');
+}
+
+async function startScanFlow() {
+  holdAbort = false;
+  // Geplanten SLAM-Stop abbrechen falls vorhanden
+  fetch('/api/slam/cancel_stop', {method:'POST'});
+
+  // Status prüfen
+  let st = await fetch('/api/status').then(r => r.json()).catch(() => ({}));
+  const slamAlreadyActive = !!st.slam_active;
+  const slamRunning       = !!st.slam;
+
+  // SLAM starten falls nötig
+  if (!slamRunning) {
+    const r = await fetch('/api/slam/start', {method:'POST'}).then(r => r.json()).catch(() => ({}));
+    if (!r.ok) { showMsg('⚠ SLAM Start fehlgeschlagen', 4000); return; }
+  }
+
+  await showHoldStill();
+  if (holdAbort) return;
+
+  // Aufnahme starten
+  await startRec();
+}
+
+async function showHoldStill() {
+  const ov    = document.getElementById('hold-ov');
+  const cnt   = document.getElementById('hold-count');
+  const title = document.getElementById('hold-title');
+  const sub   = document.getElementById('hold-sub');
+  const ring  = document.getElementById('ring-fg');
+  const gyro  = document.getElementById('hold-gyro');
+  const circ  = 339.3;
+
+  ov.classList.add('show');
+
+  // Phase 1: Warten bis Sensor still ist
+  title.textContent = 'SENSOR ABLEGEN';
+  title.style.color = 'var(--c-warn)';
+  sub.textContent   = 'Sensor ruhig hinlegen,\ndann startet der Scan automatisch.';
+  cnt.textContent   = '—';
+  ring.style.strokeDashoffset = circ;
+  ring.style.stroke = 'var(--c-warn)';
+  if (gyro) gyro.textContent = '';
+
+  let phase1Done = false;
+  await new Promise(resolve => {
+    const iv = setInterval(async () => {
+      if (holdAbort) { clearInterval(iv); ov.classList.remove('show'); resolve(); return; }
+      try {
+        const s = await fetch('/api/status').then(r => r.json());
+        if (gyro) {
+          const im = await fetch('/api/imu').then(r => r.json()).catch(() => ({}));
+          const gm = im.gyro_mag !== undefined ? im.gyro_mag : 0;
+          const bar = gm > 1.0 ? '████' : gm > 0.3 ? '███░' : gm > 0.1 ? '██░░' : gm > 0.05 ? '█░░░' : '░░░░';
+          gyro.textContent  = 'Bewegung: ' + bar + ' ' + gm.toFixed(3) + ' rad/s';
+          gyro.style.color  = gm < 0.05 ? 'var(--c-green)' : 'var(--c-muted)';
+        }
+        if (s.imu_still) { clearInterval(iv); phase1Done = true; resolve(); }
+      } catch(e) {}
+    }, 300);
   });
-  imuTopic.subscribe(msg => {
-    document.getElementById("roll").textContent = (msg.angle.x * 180/Math.PI).toFixed(1) + "°";
-    document.getElementById("pitch").textContent = (msg.angle.y * 180/Math.PI).toFixed(1) + "°";
-    document.getElementById("yaw").textContent = (msg.angle.z * 180/Math.PI).toFixed(1) + "°";
+
+  if (holdAbort || !phase1Done) return;
+
+  // Phase 2: 5s Countdown
+  let remaining = 20;
+  title.textContent = 'NICHT BEWEGEN';
+  title.style.color = 'var(--c-green)';
+  sub.textContent   = 'SLAM kalibriert — gleich gehts los!';
+  if (gyro) gyro.textContent = '';
+
+  await new Promise(resolve => {
+    const iv = setInterval(async () => {
+      if (holdAbort) { clearInterval(iv); ov.classList.remove('show'); resolve(); return; }
+      try {
+        const s = await fetch('/api/status').then(r => r.json());
+        if (!s.imu_still) {
+          // Sensor bewegt sich wieder: Phase 1 neu starten
+          clearInterval(iv);
+          await showHoldStill();
+          resolve();
+          return;
+        }
+      } catch(e) {}
+      cnt.textContent = remaining;
+      cnt.style.color = 'var(--c-green)';
+      ring.style.stroke = 'var(--c-green)';
+      ring.style.strokeDashoffset = circ * (1 - remaining / 20);
+      remaining--;
+      if (remaining < 0) {
+        clearInterval(iv);
+        ov.classList.remove('show');
+        resolve();
+      }
+    }, 1000);
   });
 }
 
-// Fetch points from Flask API (fast, pre-processed)
-async function fetchPoints() {
+async function startRec() {
+  // Auto-DISARM-Timer deaktivieren sobald Scan laeuft
+  fetch('/api/arm/scan_active', {method:'POST'});
+  const btn = document.getElementById('rec-btn');
+  btn.style.opacity = '0.5';
   try {
-    const res = await fetch("/api/points");
-    const pts = await res.json();
-    if (pts && pts.length > 0) {
-      const pos = new Float32Array(pts.length * 3);
-      for (let i = 0; i < pts.length; i++) {
-        pos[i*3]   = pts[i][0];      // x
-        pos[i*3+1] = pts[i][2];      // z -> y
-        pos[i*3+2] = -pts[i][1];     // -y -> z
-      }
-      ptGeom.dispose();
-      ptGeom = new THREE.BufferGeometry();
-      ptGeom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      ptCloud.geometry = ptGeom;
-      document.getElementById("pts").textContent = pts.length;
-      frameCount++;
-      const now = Date.now();
-      if (now - lastFpsTime > 1000) {
-        document.getElementById("rate").textContent = frameCount + " Hz";
-        frameCount = 0;
-        lastFpsTime = now;
+    const d = await fetch('/api/record/start', {method:'POST'}).then(r => r.json());
+    btn.style.opacity = '1';
+    if (!d.ok) { showMsg('⚠ ' + d.msg, 4000); return; }
+    isRec = true; curBag = d.bag; recT0 = Date.now();
+    btn.className = 'recording';
+    btn.querySelector('.dot').style.borderRadius = '3px';
+    document.getElementById('rec-lbl').textContent = 'STOPP';
+    document.getElementById('rec-overlay').classList.add('show');
+    recIv = setInterval(() => {
+      const s = Math.floor((Date.now()-recT0)/1000);
+      document.getElementById('rec-timer').textContent = fmt(s);
+      document.getElementById('ss-dur').textContent   = fmt(s);
+    }, 1000);
+    statusIv = setInterval(async () => {
+      try {
+        const bags = await fetch('/api/bags').then(r => r.json());
+        const b = bags.find(x => x.name === curBag);
+        if (b) document.getElementById('ss-mb').textContent = b.size_mb + ' MB';
+      } catch(e) {}
+    }, 4000);
+  } catch(err) {
+    btn.style.opacity = '1';
+    showMsg('⚠ Verbindungsfehler', 3000);
+  }
+}
+
+async function stopRec() {
+  isRec = false;
+  clearInterval(recIv); clearInterval(statusIv);
+  const btn = document.getElementById('rec-btn');
+  btn.className = '';
+  btn.querySelector('.dot').style.borderRadius = '50%';
+  document.getElementById('rec-lbl').textContent = 'SCAN';
+  document.getElementById('rec-timer').textContent = '';
+  document.getElementById('rec-overlay').classList.remove('show');
+  await fetch('/api/record/stop', {method:'POST'});
+  // SLAM laeuft noch 30s weiter (fuer schnellen neuen Scan)
+  fetch('/api/slam/schedule_stop', {method:'POST'});
+  showSaveOv();
+}
+
+// ── Save dialog ───────────────────────────────────────────────────────────────
+async function showSaveOv() {
+  const dur = Math.floor((Date.now()-recT0)/1000);
+  document.getElementById('s-dur').textContent  = fmt(dur) + ' (' + Math.ceil(dur/60) + ' min)';
+  document.getElementById('s-file').textContent = curBag || '—';
+  document.getElementById('s-size').textContent = '…';
+  const ts = (curBag||'').replace('scan_','').replace('.bag','');
+  document.getElementById('s-name').value = 'Scan ' + ts.replace(/_/g,' ');
+  document.getElementById('save-ov').classList.add('show');
+  setTimeout(() => document.getElementById('s-name').focus(), 100);
+  await new Promise(r => setTimeout(r, 1500));
+  try {
+    const bags = await fetch('/api/bags').then(r => r.json());
+    const b = bags.find(x => x.name === curBag);
+    document.getElementById('s-size').textContent = b ? b.size_mb + ' MB' : '—';
+  } catch(e) {}
+}
+async function saveRec() {
+  const name = document.getElementById('s-name').value.trim();
+  if (!name) { document.getElementById('s-name').focus(); return; }
+  await fetch('/api/bags/'+encodeURIComponent(curBag)+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  closeOv('save-ov'); loadBags();
+}
+async function discardRec() {
+  if (!confirm('Aufnahme endgültig löschen?')) return;
+  if (curBag) await fetch('/api/bags/'+encodeURIComponent(curBag),{method:'DELETE'});
+  closeOv('save-ov');
+}
+
+// ── Scan-Liste ────────────────────────────────────────────────────────────────
+let dwOpen = false;
+function toggleDrawer() {
+  dwOpen = !dwOpen;
+  document.getElementById('drawer').classList.toggle('open', dwOpen);
+  document.getElementById('drw-arrow').textContent = dwOpen ? '▼' : '▲';
+  if (dwOpen) loadBags();
+}
+async function loadBags() {
+  try {
+    const bags = await fetch('/api/bags').then(r => r.json());
+    document.getElementById('bag-cnt').textContent = bags.length;
+    const body = document.getElementById('drw-body');
+    if (!bags.length) { body.innerHTML = '<div id="drw-empty">Keine Scans vorhanden</div>'; return; }
+    const usbOn = usbConnected;
+    body.innerHTML = bags.map(b => {
+      const stem    = b.name.replace(/\.bag$/, '');
+      const xyzName  = stem + '.xyz';
+      const hiName   = stem + '_hires.xyz';
+      const usbCls   = usbOn ? 'usb-on' : '';
+      const xyzInfo  = b.has_xyz  ? ` <span style="color:var(--c-muted);font-size:10px">${b.xyz_mb}MB</span>` : '';
+      const hiInfo   = b.has_hires ? ` <span style="color:var(--c-muted);font-size:10px">${b.hires_mb}MB</span>` : '';
+      return `<div class="bag-row">
+      <div class="bag-name">${stem}</div>
+      <div class="bag-meta">${b.size_mb} MB · ${b.mtime}</div>
+      <div class="bag-actions">
+        <button class="bbtn" onclick="dlBag('${b.name}')">↓ BAG</button>
+        <button class="bbtn b-usb ${usbCls}" onclick="copyToUsb('${b.name}')" title="BAG auf USB kopieren">⏏ BAG</button>
+        <button class="bbtn" onclick="openRename('${b.name}')">✏</button>
+        <button class="bbtn b-ex" onclick="exportBag('${b.name}')">XYZ${xyzInfo}</button>
+        ${b.has_xyz  ? `<button class="bbtn b-usb ${usbCls}" onclick="copyToUsb('${xyzName}')"  title="XYZ auf USB">⏏ XYZ</button>` : ''}
+        <button class="bbtn b-hi" onclick="exportBagHires('${b.name}')">HD${hiInfo}</button>
+        ${b.has_hires ? `<button class="bbtn b-usb ${usbCls}" onclick="copyToUsb('${hiName}')" title="HD-XYZ auf USB">⏏ HD</button>` : ''}
+        <button class="bbtn b-rm" onclick="delBag('${b.name}')">🗑</button>
+      </div></div>`;
+    }).join('');
+  } catch(e) {}
+}
+function dlBag(n) { window.location = '/api/download/' + encodeURIComponent(n); }
+async function delBag(n) {
+  if (!confirm('Scan löschen?\n' + n.replace(/\.bag$/,''))) return;
+  await fetch('/api/bags/'+encodeURIComponent(n),{method:'DELETE'}); loadBags();
+}
+let renTgt = null;
+function openRename(n) {
+  renTgt = n;
+  document.getElementById('ren-name').value = n.replace(/\.bag$/,'');
+  document.getElementById('ren-ov').classList.add('show');
+  setTimeout(() => document.getElementById('ren-name').focus(), 100);
+}
+async function doRename() {
+  const name = document.getElementById('ren-name').value.trim();
+  if (!name) return;
+  await fetch('/api/bags/'+encodeURIComponent(renTgt)+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  closeOv('ren-ov'); loadBags();
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+let expFile = null, expIv = null;
+
+function _startExportUI(file, color) {
+  expFile = file;
+  clearInterval(expIv);
+  document.getElementById('exp-file').textContent = file;
+  document.getElementById('exp-progress').textContent = '0 MB…';
+  document.getElementById('exp-progress').style.color = color;
+  document.getElementById('exp-bar').style.background = color;
+  document.getElementById('exp-bar').style.width = '0%';
+  document.getElementById('exp-bar').style.transition = 'width .5s';
+  const btn = document.getElementById('exp-dl-btn');
+  btn.disabled = true; btn.style.opacity = '.35';
+  document.getElementById('exp-ov').classList.add('show');
+  expIv = setInterval(pollExport, 1500);
+}
+
+async function exportBag(n) {
+  const d = await fetch('/api/bags/'+encodeURIComponent(n)+'/export',{method:'POST'}).then(r=>r.json());
+  if (!d.ok) { showMsg('Export Fehler: ' + d.msg, 4000); return; }
+  _startExportUI(d.file, 'var(--c-warn)');
+}
+
+async function exportBagHires(n) {
+  const d = await fetch('/api/bags/'+encodeURIComponent(n)+'/export_hires',{method:'POST'}).then(r=>r.json());
+  if (!d.ok) { showMsg('HD Export Fehler: ' + d.msg, 4000); return; }
+  _startExportUI(d.file, '#008cff');
+}
+
+async function pollExport() {
+  try {
+    const p = await fetch('/api/export/progress').then(r => r.json());
+    const bar  = document.getElementById('exp-bar');
+    const prog = document.getElementById('exp-progress');
+    const btn  = document.getElementById('exp-dl-btn');
+    if (p.running) {
+      const pct = p.pct || 0;
+      const est = p.est_total_mb > 0 ? ' / ~' + p.est_total_mb + ' MB' : '';
+      prog.textContent = p.mb_written + ' MB' + est + ' (' + pct + '%)';
+      bar.style.width = pct + '%';
+    } else {
+      // Fertig oder abgebrochen — pruefen ob Datei existiert
+      const r = await fetch('/api/download/'+encodeURIComponent(expFile),{method:'HEAD'}).catch(()=>null);
+      clearInterval(expIv);
+      if (r && r.ok) {
+        bar.style.width = '100%';
+        bar.style.background = 'var(--c-green)';
+        prog.style.color = 'var(--c-green)';
+        // Finale Dateigroesse anzeigen
+        const size = r.headers.get('Content-Length');
+        const mb = size ? (parseInt(size)/1024/1024).toFixed(1) + ' MB' : '';
+        prog.textContent = '✓ Fertig — ' + mb;
+        btn.disabled = false; btn.style.opacity = '1';
+      } else {
+        bar.style.background = 'var(--c-red)';
+        prog.style.color = 'var(--c-red)';
+        prog.textContent = 'Fehler oder abgebrochen';
       }
     }
-  } catch(e) {
-    console.error("fetch points:", e);
-  }
-  setTimeout(fetchPoints, 200);
+  } catch(e) {}
 }
-fetchPoints();
 
-// Animate
-function animate() {
-  requestAnimationFrame(animate);
-  renderer.render(scene, camera);
+async function cancelExport() {
+  clearInterval(expIv);
+  await fetch('/api/export/cancel', {method:'POST'});
+  closeOv('exp-ov');
 }
-animate();
+function dlExport() {
+  if (expFile) window.location = '/api/download/' + encodeURIComponent(expFile);
+  closeOv('exp-ov');
+}
+
+// ── SLAM Engine ───────────────────────────────────────────────────────────────
+let selectedEngine = 'lio_sam';
+function setEngine(engine) {
+  selectedEngine = engine;
+  fetch('/api/slam/engine', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({engine})});
+  const lio  = document.getElementById('eng-lio');
+  const flio = document.getElementById('eng-flio');
+  lio.style.borderColor  = engine==='lio_sam'  ? 'var(--c-green)' : 'var(--c-border)';
+  lio.style.color        = engine==='lio_sam'  ? 'var(--c-green)' : 'var(--c-muted)';
+  lio.style.background   = engine==='lio_sam'  ? 'rgba(76,175,80,.15)' : 'none';
+  flio.style.borderColor = engine==='fast_lio' ? 'var(--c-blue)' : 'var(--c-border)';
+  flio.style.color       = engine==='fast_lio' ? 'var(--c-blue)' : 'var(--c-muted)';
+  flio.style.background  = engine==='fast_lio' ? 'rgba(79,195,247,.15)' : 'none';
+}
+
+// ── ARM / DISARM ──────────────────────────────────────────────────────────────
+async function toggleArm() {
+  if (currentArmState === 'armed') {
+    if (!confirm('System DISARMEN? LiDAR, IMU und SLAM werden gestoppt.')) return;
+    const d = await fetch('/api/disarm', {method:'POST'}).then(r => r.json()).catch(() => ({}));
+    if (d.ok === false) showMsg('Fehler: ' + (d.msg || '?'), 4000);
+  } else if (currentArmState === 'arming') {
+    // Arming abbrechen → Disarm
+    const d = await fetch('/api/disarm', {method:'POST'}).then(r => r.json()).catch(() => ({}));
+    if (d.ok === false) showMsg('Fehler: ' + (d.msg || '?'), 4000);
+    else showMsg('Arming abgebrochen', 3000);
+  } else if (currentArmState === 'disarmed') {
+    const d = await fetch('/api/arm', {method:'POST'}).then(r => r.json()).catch(() => ({}));
+    if (d.ok === false) showMsg('Fehler: ' + (d.msg || '?'), 4000);
+    else showMsg('System startet… (~40s)', 5000);
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function closeOv(id) { document.getElementById(id).classList.remove('show'); }
+
+let msgTimeout = null;
+function showMsg(txt, ms) {
+  const el = document.getElementById('rec-timer');
+  el.textContent = txt;
+  clearTimeout(msgTimeout);
+  msgTimeout = setTimeout(() => el.textContent = '', ms);
+}
+
+document.getElementById('s-name').addEventListener('keydown',  e => { if(e.key==='Enter')saveRec();  if(e.key==='Escape')closeOv('save-ov'); });
+document.getElementById('ren-name').addEventListener('keydown', e => { if(e.key==='Enter')doRename(); if(e.key==='Escape')closeOv('ren-ov'); });
+
+// ── Diagnose ──────────────────────────────────────────────────────────────────
+let diagOpen = false, diagIv = null;
+
+function toggleDiag() {
+  diagOpen = !diagOpen;
+  document.getElementById('diag-panel').style.display = diagOpen ? 'block' : 'none';
+  if (diagOpen) {
+    renderFrame([], {roll:0,pitch:0,gyro_mag:0,ax:0,ay:0,az:9.8,wx:0,wy:0,wz:0});
+    diagIv = setInterval(pollDiag, 150);
+  } else {
+    clearInterval(diagIv); diagIv = null;
+  }
+}
+
+// ── Canvas ────────────────────────────────────────────────────────────────────
+const SCAN_RANGE = 15;
+const SCAN_H = 260;   // Höhe Scanbereich
+const LEVEL_H = 100;  // Höhe Wasserwaagenbereich
+
+function renderFrame(pts, imu) {
+  const cv = document.getElementById('scan-canvas');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  drawTopDown(ctx, W, pts);
+  drawSpiritLevel(ctx, W, imu);
+  document.getElementById('scan-pts-count').textContent = pts.length + ' Punkte';
+}
+
+function drawTopDown(ctx, W, pts) {
+  const cx = W/2, cy = SCAN_H/2, scale = cx / SCAN_RANGE;
+
+  // Gitterkreise
+  ctx.lineWidth = 1;
+  [5, 10, 15].forEach(r => {
+    ctx.strokeStyle = '#0d2030';
+    ctx.beginPath(); ctx.arc(cx, cy, r * scale, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#1a3040'; ctx.font = '9px monospace';
+    ctx.fillText(r+'m', cx + 3, cy - r*scale + 10);
+  });
+
+  // Achsenlinien
+  ctx.strokeStyle = '#0d2030';
+  ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx, SCAN_H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.stroke();
+
+  // Achsenlabels
+  ctx.font = 'bold 10px monospace';
+  ctx.fillStyle = '#4fc3f7'; ctx.fillText('X+ vorwärts', cx-36, 12);
+  ctx.fillStyle = '#4caf50'; ctx.fillText('Y+', 3, cy-3);
+  ctx.fillStyle = '#ef5350'; ctx.fillText('Y-', W-20, cy-3);
+
+  // Punkte
+  ctx.fillStyle = '#00e5ff';
+  pts.forEach(([x,y]) => {
+    const px = cx - y * scale;
+    const py = cy - x * scale;
+    if (px<0||px>W||py<0||py>SCAN_H) return;
+    ctx.fillRect(px-1, py-1, 2, 2);
+  });
+
+  // Sensorposition
+  ctx.fillStyle = '#ff5722';
+  ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.fill();
+}
+
+function drawSpiritLevel(ctx, W, imu) {
+  const top   = SCAN_H + 4;
+  const H     = LEVEL_H - 8;
+  const cx    = W / 2;
+  const cy    = top + H / 2;
+  const slr   = 36;   // Wasserwaagen-Radius
+
+  // Trennlinie
+  ctx.strokeStyle = '#0d2030'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(8, top); ctx.lineTo(W-8, top); ctx.stroke();
+
+  // Beschleunigungswerte (Text links)
+  ctx.font = '10px monospace'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#546e7a';
+  ctx.fillText('aX '+((imu.ax||0).toFixed(2)), 6, top+14);
+  ctx.fillText('aY '+((imu.ay||0).toFixed(2)), 6, top+26);
+  ctx.fillStyle = (Math.abs((imu.az||0) - 9.8) < 1) ? '#4caf50' : '#ef5350';
+  ctx.fillText('aZ '+((imu.az||0).toFixed(2)), 6, top+38);
+
+  // Winkelgeschwindigkeit (Text rechts)
+  const gm = imu.gyro_mag || 0;
+  const gyroCol = gm < 0.05 ? '#4caf50' : gm < 0.5 ? '#ff9800' : '#ef5350';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#546e7a';
+  ctx.fillText('wX '+((imu.wx||0).toFixed(3)), W-6, top+14);
+  ctx.fillText('wY '+((imu.wy||0).toFixed(3)), W-6, top+26);
+  ctx.fillStyle = gyroCol;
+  ctx.fillText('wZ '+((imu.wz||0).toFixed(3)), W-6, top+38);
+
+  // Wasserwaage: äusserer Ring
+  ctx.textAlign = 'center';
+  ctx.strokeStyle = '#1e3a4a'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, slr, 0, Math.PI*2); ctx.stroke();
+  // Zielkreis (Mitte)
+  ctx.strokeStyle = '#0d2030'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI*2); ctx.stroke();
+  // Kreuzhaare
+  ctx.beginPath();
+  ctx.moveTo(cx-slr, cy); ctx.lineTo(cx+slr, cy);
+  ctx.moveTo(cx, cy-slr); ctx.lineTo(cx, cy+slr);
+  ctx.stroke();
+
+  // Blase: Position aus Roll/Pitch
+  const roll_r  = (imu.roll  || 0) * Math.PI / 180;
+  const pitch_r = (imu.pitch || 0) * Math.PI / 180;
+  const maxD = slr - 8;
+  // Wasserwaage: Blase bewegt sich zur höheren Seite (entgegengesetzt zur Neigung)
+  let bx = cx - Math.sin(roll_r)  * maxD;
+  let by = cy + Math.sin(pitch_r) * maxD;
+  // Blase darf nicht aus dem Ring heraus
+  const d = Math.sqrt((bx-cx)**2 + (by-cy)**2);
+  if (d > maxD) { bx = cx + (bx-cx)/d*maxD; by = cy + (by-cy)/d*maxD; }
+
+  // Blase färben
+  const still = gm < 0.05;
+  const centered = d < 5;
+  const bCol = (still && centered) ? '#00e676' : still ? '#4fc3f7' : gyroCol;
+  ctx.fillStyle = bCol;
+  ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI*2); ctx.fill();
+
+  // Gyro-Bogen um Ring (zeigt Bewegung)
+  if (gm > 0.02) {
+    const arc = Math.min(gm / 2.0, 1.0) * Math.PI * 2;
+    ctx.strokeStyle = gyroCol; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, slr+5, -Math.PI/2, -Math.PI/2 + arc); ctx.stroke();
+  }
+
+  // Label
+  ctx.fillStyle = '#37474f'; ctx.font = '9px monospace';
+  ctx.fillText('Roll '+((imu.roll||0).toFixed(1))+'°  Pitch '+((imu.pitch||0).toFixed(1))+'°', cx, cy+slr+14);
+}
+
+// ── Diagnose Polling ──────────────────────────────────────────────────────────
+async function pollDiag() {
+  try {
+    const [scan, imu] = await Promise.all([
+      fetch('/api/scan_preview').then(r => r.json()),
+      fetch('/api/imu').then(r => r.json()),
+    ]);
+    renderFrame(scan.pts || [], imu);
+  } catch(e) {}
+}
 </script>
+
+<!-- Hold-Still Overlay -->
+<div id="hold-ov">
+  <div id="hold-ring">
+    <svg viewBox="0 0 114 114" width="130" height="130">
+      <circle class="ring-bg" cx="57" cy="57" r="54"/>
+      <circle class="ring-fg" id="ring-fg" cx="57" cy="57" r="54"/>
+    </svg>
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div id="hold-count" style="color:var(--c-warn)">—</div>
+    </div>
+  </div>
+  <div id="hold-title" style="color:var(--c-warn)">SENSOR ABLEGEN</div>
+  <div id="hold-sub">Sensor ruhig hinlegen,<br>dann startet der Scan automatisch.</div>
+  <div id="hold-gyro" style="font-size:11px;color:var(--c-muted);margin-top:-4px">Bewegung: —</div>
+  <button id="hold-cancel" onclick="cancelScan()">Abbrechen</button>
+</div>
+
 </body>
 </html>

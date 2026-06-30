@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>LiDAR Scanner</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#e0e0e0;font-family:"Courier New",monospace}
+    #canvas{display:block;position:fixed;top:0;left:0;z-index:0;pointer-events:none}
+    /* Transparent overlay for 3-D navigation – sits above canvas but below UI */
+    #ctrl{position:fixed;top:0;left:0;right:0;bottom:0;z-index:1;cursor:grab}
+    #ctrl.dragging{cursor:grabbing}
+
+    #info{position:fixed;top:12px;right:12px;z-index:10;background:rgba(0,0,0,.9);border:1px solid #1e3a4a;padding:12px 14px;min-width:185px;border-radius:6px}
+    #info h2{font-size:13px;color:#4fc3f7;border-bottom:1px solid #1e3a4a;padding-bottom:6px;margin-bottom:8px}
+    .row{display:flex;justify-content:space-between;margin:3px 0;font-size:12px}
+    .val{color:#4fc3f7;font-weight:bold}
+    .ok{color:#4caf50}.warn{color:#ff9800}.err{color:#f44336}
+    hr.sep{border:none;border-top:1px solid #1e3a4a;margin:8px 0}
+    #scans-btn{width:100%;margin-top:10px;padding:7px;background:rgba(79,195,247,.1);border:1px solid #4fc3f7;color:#4fc3f7;cursor:pointer;border-radius:4px;font-family:inherit;font-size:12px;letter-spacing:1px}
+
+    /* Single recording toggle button */
+    #rec-area{position:fixed;bottom:110px;left:50%;transform:translateX(-50%);z-index:10;display:flex;flex-direction:column;align-items:center;gap:6px}
+    #rec-btn{width:72px;height:72px;border-radius:50%;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-family:inherit;font-size:10px;font-weight:bold;letter-spacing:1px;background:#c62828;color:#fff;box-shadow:0 0 18px rgba(198,40,40,.5);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+    #rec-btn .dot{width:18px;height:18px;border-radius:50%;background:#fff;transition:border-radius .2s}
+    #rec-btn.recording{background:#1a1a1a;border:2px solid #f44336;box-shadow:0 0 22px rgba(244,67,54,.7);animation:pulse 1.2s infinite}
+    #rec-btn.recording .dot{border-radius:3px;background:#f44336}
+    @keyframes pulse{0%,100%{box-shadow:0 0 12px rgba(244,67,54,.4)}50%{box-shadow:0 0 28px rgba(244,67,54,.9)}}
+    #rec-timer{font-size:16px;color:#f44336;font-weight:bold;letter-spacing:2px;min-height:20px}
+
+    /* Status panel – appears during recording */
+    #scan-status{position:fixed;bottom:190px;left:50%;transform:translateX(-50%);z-index:10;background:rgba(0,0,0,.88);border:1px solid #c62828;border-radius:6px;padding:8px 18px;display:none;min-width:210px}
+    #scan-status.show{display:block}
+    #scan-status .ss-hd{font-size:9px;color:#f44336;letter-spacing:2px;text-align:center;margin-bottom:5px}
+    .ss-row{display:flex;justify-content:space-between;font-size:11px;margin:2px 0}
+    .ss-lbl{color:#607d8b}.ss-val{color:#4fc3f7;font-weight:bold}
+
+    .tbtn{width:100%;padding:7px;background:rgba(79,195,247,.08);border:1px solid #4fc3f7;color:#4fc3f7;cursor:pointer;border-radius:4px;font-family:inherit;font-size:11px;letter-spacing:1px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;margin-top:5px;text-align:center}
+    .tbtn.on{border-color:#4caf50;color:#4caf50;background:rgba(76,175,80,.1)}
+    #sysinfo{position:fixed;right:12px;z-index:10;background:rgba(0,0,0,.9);border:1px solid #1e3a4a;padding:12px 14px;min-width:185px;border-radius:6px}
+    #sysinfo h2{font-size:13px;color:#4fc3f7;border-bottom:1px solid #1e3a4a;padding-bottom:6px;margin-bottom:8px}
+    .bar-bg{background:#0d1a24;border-radius:3px;height:5px;margin:4px 0 6px}
+    .bar-fg{height:5px;border-radius:3px;background:#4fc3f7;transition:width .5s}
+
+    #drawer{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(6,12,18,.97);border-top:1px solid #1e3a4a;transition:transform .28s cubic-bezier(.4,0,.2,1);transform:translateY(calc(100% - 44px));max-height:300px}
+    #drawer.open{transform:translateY(0)}
+    #drw-head{height:44px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;border-bottom:1px solid #1e3a4a;user-select:none;touch-action:manipulation}
+    #drw-head span{font-size:13px;color:#4fc3f7;letter-spacing:1px}
+    #drw-arrow{transition:transform .28s;font-size:14px;color:#4fc3f7}
+    #drawer.open #drw-arrow{transform:rotate(180deg)}
+    #drw-body{overflow-y:auto;max-height:252px}
+    .bag-row{display:flex;align-items:center;padding:7px 14px;border-bottom:1px solid #0d1a24;gap:8px;font-size:12px}
+    .bag-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .bag-meta{color:#607d8b;white-space:nowrap;font-size:11px}
+    .bag-actions{display:flex;gap:5px;flex-shrink:0}
+    .bbtn{padding:4px 7px;border-radius:3px;border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:bold;touch-action:manipulation}
+    .b-dl{background:rgba(79,195,247,.15);color:#4fc3f7}
+    .b-rn{background:rgba(255,152,0,.15);color:#ff9800}
+    .b-rm{background:rgba(244,67,54,.15);color:#f44336}
+    .b-ex{background:rgba(76,175,80,.15);color:#4caf50}
+    .bbtn:hover{filter:brightness(1.4)}
+    #drw-empty{padding:18px;text-align:center;color:#607d8b;font-size:12px}
+
+    .ov{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center}
+    .ov.show{display:flex}
+    .card{background:#0d1a24;border:1px solid #1e3a4a;border-radius:8px;padding:22px;width:90%;max-width:400px}
+    .card h3{color:#4fc3f7;margin-bottom:14px;font-size:13px;letter-spacing:1px}
+    .mrow{display:flex;justify-content:space-between;margin:5px 0;font-size:12px}
+    .mrow .v{color:#4fc3f7}
+    .minp{width:100%;margin-top:12px;padding:10px;background:#0a141e;border:1px solid #1e3a4a;color:#e0e0e0;font-family:inherit;font-size:13px;border-radius:4px;outline:none}
+    .minp:focus{border-color:#4fc3f7}
+    .mbtns{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+    .bp{padding:8px 18px;background:#4fc3f7;color:#000;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:12px}
+    .bs{padding:8px 18px;background:rgba(255,255,255,.08);color:#aaa;border:1px solid #333;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px}
+    .bd{padding:8px 18px;background:#c62828;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:bold;font-size:12px}
+    .msep{border:none;border-top:1px solid #1e3a4a;margin:10px 0}
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ctrl"></div>
+
+<div id="info">
+  <h2>LiDAR Scanner</h2>
+  <div class="row">ROS: <span id="ros_st" class="warn">…</span></div>
+  <div class="row">LiDAR: <span id="lid_st" class="warn">—</span></div>
+  <div class="row">SLAM: <span id="slam_st" class="warn">—</span> &nbsp;<span id="slam-mode-lbl" style="font-size:10px;color:#607d8b">RAW</span></div>
+  <hr class="sep">
+  <div class="row">Punkte: <span id="pts" class="val">0</span></div>
+  <div class="row">Rate: <span id="rate" class="val">— Hz</span></div>
+  <hr class="sep">
+  <div class="row">Roll: <span id="roll" class="val">—°</span></div>
+  <div class="row">Pitch: <span id="pitch" class="val">—°</span></div>
+  <div class="row">Yaw: <span id="yaw" class="val">—°</span></div>
+  <hr class="sep">
+  <button class="tbtn" id="slam-btn" onclick="toggleSlam()">⬡ SLAM</button>
+  <button class="tbtn" id="level-btn" onclick="toggleLevel()">⊕ LEVEL</button>
+  <button class="tbtn" id="accum-btn" onclick="toggleAccum()">◎ AKKU</button>
+  <button id="scans-btn" class="tbtn" style="margin-top:8px" onclick="toggleDrawer()">📁 SCANS</button>
+</div>
+
+<div id="sysinfo">
+  <h2>System</h2>
+  <div class="row">SSD: <span id="sys-disk" class="val">—</span></div>
+  <div class="bar-bg"><div class="bar-fg" id="disk-bar" style="width:0%"></div></div>
+  <div class="row" style="margin-bottom:3px">CPU: <span id="sys-cpu" class="val" style="font-size:10px">—</span></div>
+  <div id="cpu-bars" style="display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-bottom:6px"></div>
+  <div class="row">Temp: <span id="sys-temp" class="val">—</span></div>
+</div>
+
+<div id="scan-status">
+  <div class="ss-hd">● AUFNAHME LÄUFT</div>
+  <div class="ss-row"><span class="ss-lbl">Zeit</span><span class="ss-val" id="ss-dur">00:00</span></div>
+  <div class="ss-row"><span class="ss-lbl">Punkte</span><span class="ss-val" id="ss-pts">0</span></div>
+  <div class="ss-row"><span class="ss-lbl">Grösse</span><span class="ss-val" id="ss-mb">— MB</span></div>
+</div>
+
+<div id="rec-area">
+  <button id="rec-btn" onclick="toggleRec()"><div class="dot"></div><span id="rec-lbl">SCAN</span></button>
+  <div id="rec-timer"></div>
+</div>
+
+<div id="drawer">
+  <div id="drw-head" onclick="toggleDrawer()">
+    <span>📁 SCANS (<span id="bag-cnt">0</span>)</span>
+    <span id="drw-arrow">▲</span>
+  </div>
+  <div id="drw-body"><div id="drw-empty">Keine Scans vorhanden</div></div>
+</div>
+
+<div id="save-ov" class="ov">
+  <div class="card">
+    <h3>💾 SCAN SPEICHERN?</h3>
+    <div class="mrow">Dauer: <span id="s-dur" class="v">—</span></div>
+    <div class="mrow">Grösse: <span id="s-size" class="v">—</span></div>
+    <div class="mrow" style="font-size:10px;color:#607d8b">Datei: <span id="s-file">—</span></div>
+    <hr class="msep">
+    <input id="s-name" class="minp" type="text" placeholder="Scan-Name eingeben…">
+    <div class="mbtns">
+      <button class="bd" onclick="discardRec()">🗑 VERWERFEN</button>
+      <button class="bp" onclick="saveRec()">💾 SPEICHERN</button>
+    </div>
+  </div>
+</div>
+
+<div id="ren-ov" class="ov">
+  <div class="card">
+    <h3>✏ UMBENENNEN</h3>
+    <input id="ren-name" class="minp" type="text" placeholder="Neuer Name…">
+    <div class="mbtns">
+      <button class="bs" onclick="closeOv('ren-ov')">ABBRECHEN</button>
+      <button class="bp" onclick="doRename()">UMBENENNEN</button>
+    </div>
+  </div>
+</div>
+
+<div id="exp-ov" class="ov">
+  <div class="card">
+    <h3>📦 EXPORT</h3>
+    <div class="mrow">Datei: <span id="exp-file" class="v">—</span></div>
+    <div class="mrow" style="font-size:11px;color:#607d8b">XYZ = ArchiCAD · CloudCompare · Rhino</div>
+    <div id="exp-progress" class="mrow" style="color:#ff9800;font-size:12px">Konvertierung läuft…</div>
+    <div class="mbtns">
+      <button class="bs" onclick="closeOv('exp-ov')">SCHLIESSEN</button>
+      <button class="bp" id="exp-dl-btn" onclick="dlExport()" disabled style="opacity:0.4">↓ DOWNLOAD</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/three.min.js"></script>
+<script src="/static/roslib.min.js"></script>
+<script>
+// ── Three.js setup ────────────────────────────────────────────────────────────
+const canvas   = document.getElementById("canvas");
+const ctrl     = document.getElementById("ctrl");
+const scene    = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+scene.rotation.order = "ZXY";
+
+const camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 10000);
+camera.position.set(0, 8, 25); camera.lookAt(0,0,0);
+
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+
+const grid = new THREE.GridHelper(100,100,0x1a2a2a,0x0d1515);
+scene.add(grid);
+
+// Pre-allocated point buffer
+const MAX_PTS  = 150000;
+const ptBuf    = new Float32Array(MAX_PTS * 3);
+const ptAttr   = new THREE.BufferAttribute(ptBuf, 3);
+const ptGeom   = new THREE.BufferGeometry();
+ptGeom.setAttribute("position", ptAttr);
+ptGeom.setDrawRange(0, 0);
+const ptMat    = new THREE.PointsMaterial({color:0x00e5ff, size:0.07, sizeAttenuation:true});
+const ptCloud  = new THREE.Points(ptGeom, ptMat);
+scene.add(ptCloud);
+
+let ptCount    = 0;
+let accumMode  = false;
+let startYaw   = 0;
+let curYaw     = 0;
+let slamActive = false;   // true = points already in world frame, skip yaw rotation
+
+(function animate(){requestAnimationFrame(animate);renderer.render(scene,camera)})();
+window.addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// ── 3-D navigation on ctrl overlay ───────────────────────────────────────────
+let drag=false, prev={x:0,y:0};
+ctrl.addEventListener("mousedown",e=>{drag=true;prev={x:e.clientX,y:e.clientY};ctrl.classList.add("dragging")});
+ctrl.addEventListener("mouseup",()=>{drag=false;ctrl.classList.remove("dragging")});
+ctrl.addEventListener("mouseleave",()=>{drag=false;ctrl.classList.remove("dragging")});
+ctrl.addEventListener("mousemove",e=>{
+  if(!drag)return;
+  const dx=e.clientX-prev.x, dy=e.clientY-prev.y;
+  const q=new THREE.Quaternion();
+  q.setFromAxisAngle(new THREE.Vector3(0,1,0),dx*.01);
+  camera.position.applyQuaternion(q);
+  const rv=new THREE.Vector3(); camera.getWorldDirection(rv); rv.cross(camera.up).normalize();
+  q.setFromAxisAngle(rv,dy*.01); camera.position.applyQuaternion(q);
+  camera.lookAt(0,0,0); prev={x:e.clientX,y:e.clientY};
+});
+ctrl.addEventListener("wheel",e=>{
+  e.preventDefault();
+  camera.position.multiplyScalar(e.deltaY>0?1.1:.9);
+},{passive:false});
+
+// Touch on ctrl overlay
+let tc={}, pd=null;
+ctrl.addEventListener("touchstart",e=>{
+  e.preventDefault();
+  [...e.touches].forEach(t=>tc[t.identifier]={x:t.clientX,y:t.clientY});
+  if(e.touches.length===2){const a=e.touches[0],b=e.touches[1];pd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}
+},{passive:false});
+ctrl.addEventListener("touchend",e=>{
+  [...e.changedTouches].forEach(t=>delete tc[t.identifier]);
+  if(e.touches.length<2)pd=null;
+},{passive:true});
+ctrl.addEventListener("touchmove",e=>{
+  e.preventDefault();
+  if(e.touches.length===1){
+    const t=e.touches[0],p=tc[t.identifier]||{x:t.clientX,y:t.clientY};
+    const dx=t.clientX-p.x, dy=t.clientY-p.y;
+    const q=new THREE.Quaternion();
+    q.setFromAxisAngle(new THREE.Vector3(0,1,0),dx*.01); camera.position.applyQuaternion(q);
+    const rv=new THREE.Vector3(); camera.getWorldDirection(rv); rv.cross(camera.up).normalize();
+    q.setFromAxisAngle(rv,dy*.01); camera.position.applyQuaternion(q);
+    camera.lookAt(0,0,0); tc[t.identifier]={x:t.clientX,y:t.clientY};
+  }else if(e.touches.length===2&&pd!==null){
+    const a=e.touches[0],b=e.touches[1];
+    const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    camera.position.multiplyScalar(pd/d); camera.lookAt(0,0,0); pd=d;
+  }
+},{passive:false});
+
+// ── ROS ───────────────────────────────────────────────────────────────────────
+try{
+  const ros=new ROSLIB.Ros({url:"ws://"+location.hostname+":9090"});
+  const setSt=(id,txt,cls)=>{const e=document.getElementById(id);if(e){e.textContent=txt;e.className=cls}};
+  ros.on("connection",()=>setSt("ros_st","ok","ok"));
+  ros.on("error",()=>setSt("ros_st","err","err"));
+  ros.on("close",()=>setSt("ros_st","offline","warn"));
+}catch(e){}
+
+// ── Points fetch ──────────────────────────────────────────────────────────────
+let fc=0, fct=Date.now();
+async function fetchPts(){
+  try{
+    const d=await fetch("/api/points").then(r=>r.json());
+    if(d&&d.length>0){
+      if(accumMode){
+        const add=Math.min(d.length, MAX_PTS-ptCount);
+        if(slamActive){
+          // SLAM mode: points already in world frame (LIO-SAM output), no rotation needed
+          for(let i=0;i<add;i++){
+            ptBuf[(ptCount+i)*3]  = d[i][0];
+            ptBuf[(ptCount+i)*3+1]= d[i][2];
+            ptBuf[(ptCount+i)*3+2]= -d[i][1];
+          }
+        }else{
+          // Raw mode: compensate sensor rotation via integrated gyro yaw
+          const dy=THREE.MathUtils.degToRad(startYaw-curYaw);
+          const cy=Math.cos(dy), sy=Math.sin(dy);
+          for(let i=0;i<add;i++){
+            const x=d[i][0], y=d[i][2], z=-d[i][1];
+            ptBuf[(ptCount+i)*3]  = x*cy+z*sy;
+            ptBuf[(ptCount+i)*3+1]= y;
+            ptBuf[(ptCount+i)*3+2]= -x*sy+z*cy;
+          }
+        }
+        ptCount+=add;
+        document.getElementById("ss-pts").textContent=ptCount.toLocaleString();
+      }else{
+        ptCount=Math.min(d.length, MAX_PTS);
+        for(let i=0;i<ptCount;i++){
+          ptBuf[i*3]=d[i][0]; ptBuf[i*3+1]=d[i][2]; ptBuf[i*3+2]=-d[i][1];
+        }
+      }
+      ptAttr.needsUpdate=true;
+      ptGeom.setDrawRange(0,ptCount);
+      document.getElementById("pts").textContent=ptCount.toLocaleString();
+      fc++; const now=Date.now();
+      if(now-fct>1000){
+        document.getElementById("rate").textContent=fc+" Hz";
+        fc=0; fct=now;
+        document.getElementById("lid_st").textContent="ok";
+        document.getElementById("lid_st").className="ok";
+      }
+    }
+  }catch(e){}
+  setTimeout(fetchPts,200);
+}
+fetchPts();
+
+// ── IMU + scene leveling ──────────────────────────────────────────────────────
+let levelOn=false, curRoll=0, curPitch=0;
+
+function toggleLevel(){
+  levelOn=!levelOn;
+  document.getElementById("level-btn").classList.toggle("on",levelOn);
+  if(!levelOn) scene.rotation.set(0,0,0);
+}
+function toggleAccum(){
+  const btn=document.getElementById("accum-btn");
+  if(accumMode){
+    accumMode=false; ptCount=0; ptGeom.setDrawRange(0,0); btn.classList.remove("on");
+  }else{
+    startYaw=curYaw;
+    accumMode=true; ptCount=0; btn.classList.add("on");
+    scene.rotation.set(0,0,0);
+  }
+}
+
+setInterval(async()=>{
+  try{
+    const d=await fetch("/api/imu").then(r=>r.json());
+    curRoll=d.roll; curPitch=d.pitch; curYaw=d.yaw;
+    document.getElementById("roll").textContent=d.roll.toFixed(1)+"°";
+    document.getElementById("pitch").textContent=d.pitch.toFixed(1)+"°";
+    document.getElementById("yaw").textContent=d.yaw.toFixed(1)+"°";
+    if(levelOn && !accumMode){
+      scene.rotation.x=THREE.MathUtils.degToRad(-d.pitch);
+      scene.rotation.z=THREE.MathUtils.degToRad(-d.roll);
+    } else if(accumMode){
+      scene.rotation.set(0,0,0);
+    }
+  }catch(e){}
+  try{
+    const s=await fetch("/api/slam_active").then(r=>r.json());
+    slamActive=s.active;
+    const lbl=document.getElementById("slam-mode-lbl");
+    if(lbl) lbl.textContent=slamActive?"SLAM":"RAW";
+  }catch(e){}
+},200);
+
+// ── Recording ─────────────────────────────────────────────────────────────────
+let curBag=null, recT0=null, recIv=null, statusIv=null, isRec=false;
+const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+async function toggleRec(){
+  if(isRec){ await stopRec(); }else{ await startRec(); }
+}
+
+async function startRec(){
+  const btn=document.getElementById("rec-btn");
+  btn.style.opacity="0.5";
+  try{
+    const d=await fetch("/api/record/start",{method:"POST"}).then(r=>r.json());
+    btn.style.opacity="1";
+    if(!d.ok){
+      document.getElementById("rec-timer").textContent="⚠ "+d.msg;
+      setTimeout(()=>document.getElementById("rec-timer").textContent="",3000);
+      return;
+    }
+    isRec=true; curBag=d.bag; recT0=Date.now(); startYaw=curYaw;
+    // Reset accumulated point cloud for clean scan preview
+    ptCount=0; accumMode=true; ptGeom.setDrawRange(0,0);
+    document.getElementById("accum-btn").classList.add("on");
+    btn.classList.add("recording");
+    document.getElementById("rec-lbl").textContent="STOP";
+    document.getElementById("scan-status").classList.add("show");
+    recIv=setInterval(()=>{
+      document.getElementById("rec-timer").textContent=fmt(Math.floor((Date.now()-recT0)/1000));
+      document.getElementById("ss-dur").textContent=fmt(Math.floor((Date.now()-recT0)/1000));
+    },1000);
+    statusIv=setInterval(async()=>{
+      try{const bags=await fetch("/api/bags").then(r=>r.json()),b=bags.find(x=>x.name===curBag);
+        if(b) document.getElementById("ss-mb").textContent=b.size_mb+" MB";
+      }catch(e){}
+    },3000);
+  }catch(err){
+    btn.style.opacity="1";
+    document.getElementById("rec-timer").textContent="⚠ Verbindungsfehler";
+    setTimeout(()=>document.getElementById("rec-timer").textContent="",3000);
+  }
+}
+
+async function stopRec(){
+  isRec=false;
+  clearInterval(recIv); clearInterval(statusIv);
+  accumMode=false;
+  document.getElementById("accum-btn").classList.remove("on");
+  document.getElementById("rec-btn").classList.remove("recording");
+  document.getElementById("rec-lbl").textContent="SCAN";
+  document.getElementById("rec-timer").textContent="";
+  document.getElementById("scan-status").classList.remove("show");
+  document.getElementById("ss-pts").textContent="0";
+  document.getElementById("ss-mb").textContent="— MB";
+  await fetch("/api/record/stop",{method:"POST"});
+  showSaveOv();
+}
+
+// ── Save dialog ───────────────────────────────────────────────────────────────
+async function showSaveOv(){
+  const dur=Math.floor((Date.now()-recT0)/1000);
+  document.getElementById("s-dur").textContent=fmt(dur)+" ("+Math.ceil(dur/60)+" min)";
+  document.getElementById("s-file").textContent=curBag||"—";
+  document.getElementById("s-size").textContent="…";
+  const ts=(curBag||"").replace("scan_","").replace(".bag","");
+  document.getElementById("s-name").value="Scan "+ts.replace(/_/g," ");
+  document.getElementById("save-ov").classList.add("show");
+  document.getElementById("s-name").focus();
+  await new Promise(r=>setTimeout(r,1500));
+  try{const bags=await fetch("/api/bags").then(r=>r.json()),b=bags.find(x=>x.name===curBag);
+    document.getElementById("s-size").textContent=b?b.size_mb+" MB":"—";
+  }catch(e){}
+}
+async function saveRec(){
+  const name=document.getElementById("s-name").value.trim();
+  if(!name){document.getElementById("s-name").focus();return}
+  await fetch("/api/bags/"+encodeURIComponent(curBag)+"/rename",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+  closeOv("save-ov"); loadBags();
+}
+async function discardRec(){
+  if(curBag) await fetch("/api/bags/"+encodeURIComponent(curBag),{method:"DELETE"});
+  closeOv("save-ov");
+}
+
+// ── Drawer / bag list ─────────────────────────────────────────────────────────
+let dwOpen=false;
+function toggleDrawer(){
+  dwOpen=!dwOpen;
+  document.getElementById("drawer").classList.toggle("open",dwOpen);
+  if(dwOpen)loadBags();
+}
+async function loadBags(){
+  try{
+    const bags=await fetch("/api/bags").then(r=>r.json());
+    document.getElementById("bag-cnt").textContent=bags.length;
+    const body=document.getElementById("drw-body");
+    if(!bags.length){body.innerHTML='<div id="drw-empty">Keine Scans vorhanden</div>';return}
+    body.innerHTML=bags.map(b=>`<div class="bag-row">
+      <div class="bag-name" title="${b.name}">${b.name.replace(/\.bag$/,"")}</div>
+      <div class="bag-meta">${b.size_mb}MB · ${b.mtime.split(" ")[0]}</div>
+      <div class="bag-actions">
+        <button class="bbtn b-dl" onclick="dlBag('${b.name}')">↓</button>
+        <button class="bbtn b-rn" onclick="openRename('${b.name}')">✏</button>
+        <button class="bbtn b-rm" onclick="delBag('${b.name}')">🗑</button>
+        <button class="bbtn b-ex" onclick="exportBag('${b.name}')">XYZ</button>
+      </div></div>`).join("");
+  }catch(e){}
+}
+function dlBag(n){window.location="/api/download/"+encodeURIComponent(n)}
+async function delBag(n){
+  if(!confirm("Scan löschen?\n"+n.replace(/\.bag$/,"")))return;
+  await fetch("/api/bags/"+encodeURIComponent(n),{method:"DELETE"});loadBags();
+}
+let renTgt=null;
+function openRename(n){renTgt=n;document.getElementById("ren-name").value=n.replace(/\.bag$/,"");document.getElementById("ren-ov").classList.add("show");document.getElementById("ren-name").focus()}
+async function doRename(){
+  const name=document.getElementById("ren-name").value.trim();
+  if(!name)return;
+  await fetch("/api/bags/"+encodeURIComponent(renTgt)+"/rename",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+  closeOv("ren-ov"); loadBags();
+}
+let expFile=null;
+async function exportBag(n){
+  const d=await fetch("/api/bags/"+encodeURIComponent(n)+"/export",{method:"POST"}).then(r=>r.json());
+  if(!d.ok){alert("Export Fehler: "+d.msg);return;}
+  expFile=d.file;
+  document.getElementById("exp-file").textContent=d.file;
+  document.getElementById("exp-progress").style.display="";
+  const btn=document.getElementById("exp-dl-btn");
+  btn.disabled=true; btn.style.opacity="0.4";
+  document.getElementById("exp-ov").classList.add("show");
+  // Poll until file is ready
+  (async()=>{
+    for(let i=0;i<120;i++){
+      await new Promise(r=>setTimeout(r,3000));
+      const r=await fetch("/api/download/"+encodeURIComponent(expFile),{method:"HEAD"}).catch(()=>null);
+      if(r&&r.ok){
+        document.getElementById("exp-progress").textContent="✓ Fertig";
+        document.getElementById("exp-progress").style.color="#4caf50";
+        btn.disabled=false; btn.style.opacity="1";
+        return;
+      }
+    }
+    document.getElementById("exp-progress").textContent="Timeout – bitte nochmal versuchen";
+    document.getElementById("exp-progress").style.color="#f44336";
+  })();
+}
+function dlExport(){if(expFile)window.location="/api/download/"+encodeURIComponent(expFile);closeOv("exp-ov")}
+function closeOv(id){document.getElementById(id).classList.remove("show")}
+
+document.getElementById("s-name").addEventListener("keydown",e=>{if(e.key==="Enter")saveRec();if(e.key==="Escape")closeOv("save-ov")});
+document.getElementById("ren-name").addEventListener("keydown",e=>{if(e.key==="Enter")doRename();if(e.key==="Escape")closeOv("ren-ov")});
+
+// ── SLAM control ──────────────────────────────────────────────────────────────
+let slamOn = false;
+
+async function toggleSlam() {
+  const btn = document.getElementById("slam-btn");
+  btn.style.opacity = "0.5";
+  try {
+    const url = slamOn ? "/api/slam/stop" : "/api/slam/start";
+    const d = await fetch(url, {method: "POST"}).then(r => r.json());
+    btn.style.opacity = "1";
+    if (!d.ok) {
+      document.getElementById("rec-timer").textContent = "SLAM: " + d.msg;
+      setTimeout(() => document.getElementById("rec-timer").textContent = "", 4000);
+    }
+  } catch(e) {
+    btn.style.opacity = "1";
+  }
+}
+
+// Status polling (every 3s) – updates ROS/SLAM indicators
+setInterval(async () => {
+  try {
+    const d = await fetch("/api/status").then(r => r.json());
+    const slamEl = document.getElementById("slam_st");
+    if (d.slam) {
+      slamOn = true;
+      slamEl.textContent = "aktiv"; slamEl.className = "ok";
+      document.getElementById("slam-btn").classList.add("on");
+    } else {
+      slamOn = false;
+      slamEl.textContent = "aus"; slamEl.className = "warn";
+      document.getElementById("slam-btn").classList.remove("on");
+    }
+    if (d.ros) {
+      document.getElementById("ros_st").textContent = "ok";
+      document.getElementById("ros_st").className = "ok";
+    }
+  } catch(e) {}
+}, 3000);
+
+// Position sysinfo below info panel
+function positionSysinfo() {
+  const info = document.getElementById("info");
+  const sys = document.getElementById("sysinfo");
+  if (info && sys) sys.style.top = (info.getBoundingClientRect().bottom + 8) + "px";
+}
+positionSysinfo();
+new ResizeObserver(positionSysinfo).observe(document.getElementById("info"));
+
+// Sysinfo polling (every 5s)
+async function pollSysinfo() {
+  try {
+    const d = await fetch("/api/sysinfo").then(r => r.json());
+    document.getElementById("sys-disk").textContent = d.disk_used_gb + " / " + d.disk_total_gb + " GB";
+    document.getElementById("disk-bar").style.width = Math.min(d.disk_pct, 100) + "%";
+    document.getElementById("disk-bar").style.background = d.disk_pct > 85 ? "#f44336" : "#4fc3f7";
+    document.getElementById("sys-cpu").textContent = "load " + d.cpu_load;
+    const barsEl = document.getElementById("cpu-bars");
+    if (d.cpu_per && d.cpu_per.length) {
+      barsEl.innerHTML = d.cpu_per.map((pct, i) => {
+        const col = pct > 80 ? "#f44336" : pct > 50 ? "#ff9800" : "#4fc3f7";
+        return `<div title="CPU${i}: ${pct}%" style="display:flex;flex-direction:column;align-items:center;gap:2px">
+          <div style="font-size:9px;color:#607d8b">C${i}</div>
+          <div style="width:100%;height:32px;background:#0d1a24;border-radius:2px;position:relative;overflow:hidden">
+            <div style="position:absolute;bottom:0;width:100%;height:${pct}%;background:${col};transition:height .5s"></div>
+          </div>
+          <div style="font-size:9px;color:${col}">${Math.round(pct)}</div>
+        </div>`;
+      }).join("");
+    }
+    document.getElementById("sys-temp").textContent = d.temp_c + " °C";
+  } catch(e) {}
+}
+pollSysinfo();
+setInterval(pollSysinfo, 5000);
+</script>
+</body>
+</html>

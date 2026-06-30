@@ -13,7 +13,7 @@ source /home/nvidia/catkin_ws/devel/setup.bash
 echo "[$(date)] === LiDAR System Start ===" | tee $LOG_DIR/lidar_start.log
 
 # 1. WiFi / Hotspot
-bash /home/nvidia/wifi_ap.sh >> $LOG_DIR/lidar_start.log 2>&1
+bash /home/nvidia/UNGENAU-LIDAR/scripts/wifi_ap.sh >> $LOG_DIR/lidar_start.log 2>&1
 IP=$(ip -4 addr show wlan0 | grep -oP "(?<=inet )[\d.]+" | head -1)
 
 # 2. Alte Prozesse beenden
@@ -31,10 +31,10 @@ echo "[LiDAR] ouster_ros wird per ARM gestartet — übersprungen" | tee -a $LOG
 # 5. SBG IMU Reader + NED->ENU Konverter
 if [ -e /dev/ttyUSB0 ]; then
     echo "[IMU] sbg_driver (EKF+ENU) -> /imu/data ..." | tee -a $LOG_DIR/lidar_start.log
-    nohup bash -c "source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash && roslaunch sbg_driver sbg_device.launch" \
+    nohup bash -c "source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash && roslaunch /home/nvidia/UNGENAU-LIDAR/ros/launch/sbg_device.launch" \
         > $LOG_DIR/sbg.log 2>&1 &
     echo "[IMU] sbg_imu_combiner -> /imu/data (EKF+ENU) ..." | tee -a $LOG_DIR/lidar_start.log
-    nohup bash -c "source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash && python /home/nvidia/sbg_imu_combiner.py" \
+    nohup bash -c "source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash && python /home/nvidia/UNGENAU-LIDAR/scripts/sbg_imu_combiner.py" \
         > $LOG_DIR/sbg_combiner.log 2>&1 &
     sleep 5
 fi
@@ -50,18 +50,18 @@ sleep 3
 
 # 7. ROS→Flask Brücke
 echo "[Bridge] bridge.py..." | tee -a $LOG_DIR/lidar_start.log
-nohup bash -c "source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash && python2 /home/nvidia/bridge.py" > $LOG_DIR/bridge.log 2>&1 &
+nohup bash -c "source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash && python2 /home/nvidia/UNGENAU-LIDAR/scripts/bridge.py" > $LOG_DIR/bridge.log 2>&1 &
 sleep 2
 
 # 8. Flask Web Server
 echo "[Web] Flask..." | tee -a $LOG_DIR/lidar_start.log
 fuser -k 5000/tcp 2>/dev/null
 sleep 1
-cd /home/nvidia/lidar_viewer
+cd /home/nvidia/UNGENAU-LIDAR/webui
 nohup python3 app.py > $LOG_DIR/flask.log 2>&1 &
 
 echo "" | tee -a $LOG_DIR/lidar_start.log
-pgrep -f watchdog.sh > /dev/null || nohup /home/nvidia/watchdog.sh > /tmp/watchdog.log 2>&1 &
+pgrep -f watchdog.sh > /dev/null || nohup /home/nvidia/UNGENAU-LIDAR/scripts/watchdog.sh > /tmp/watchdog.log 2>&1 &
 
 echo "=== Bereit ===" | tee -a $LOG_DIR/lidar_start.log
 echo "Web: http://${IP:-10.42.0.1}:5000" | tee -a $LOG_DIR/lidar_start.log

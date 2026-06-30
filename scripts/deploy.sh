@@ -1,55 +1,36 @@
 #!/bin/bash
-# Deploy all LiDAR scanner configs to Jetson TX2
+# Deploy: lokale Änderungen auf den Jetson bringen und Dienste neu starten.
+#
+# Das Git-Repo UNGENAU-LIDAR liegt auf dem Jetson unter /home/nvidia/UNGENAU-LIDAR
+# und ist dort der EINZIGE Ort an dem der Code liegt (keine Kopien, keine Symlinks).
+# Alle Skripte/Configs/Launch-Files referenzieren absolute Pfade ins Repo.
+#
+# Workflow:
+#   1. Lokal committen + pushen (git push origin main)
+#   2. bash scripts/deploy.sh ausführen -> zieht auf dem Jetson (git pull) und
+#      startet die betroffenen systemd-Dienste neu.
+#
 # Usage: bash scripts/deploy.sh [user@host]
 
 set -e
 
-TARGET="${1:-nvidia@192.168.31.39}"
+TARGET="${1:-nvidia@100.64.0.25}"
 PASS="nvidia"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-
 SSH="sshpass -p $PASS ssh -o StrictHostKeyChecking=no"
-SCP="sshpass -p $PASS scp -o StrictHostKeyChecking=no"
 
-echo "=== Deploying to $TARGET ==="
+echo "=== Deploy auf $TARGET ==="
 
-# Web UI
-echo "[1/4] Deploying Flask web UI..."
-$SSH "$TARGET" "mkdir -p ~/lidar-webui/templates"
-$SCP "$REPO_ROOT/webui/app.py" "$TARGET:~/lidar-webui/app.py"
-$SCP "$REPO_ROOT/webui/templates/index.html" "$TARGET:~/lidar-webui/templates/index.html"
+echo "[1/3] git pull auf dem Jetson..."
+$SSH "$TARGET" "cd /home/nvidia/UNGENAU-LIDAR && git pull --ff-only"
 
-# Config files
-echo "[2/4] Deploying config files..."
-$SCP "$REPO_ROOT/config/smb.conf" "$TARGET:/tmp/smb.conf"
-$SCP "$REPO_ROOT/config/wifi-fallback.sh" "$TARGET:/tmp/wifi-fallback.sh"
-$SCP "$REPO_ROOT/config/lidar-hotspot.service" "$TARGET:/tmp/"
-$SCP "$REPO_ROOT/config/lidar-hotspot.timer" "$TARGET:/tmp/"
-$SCP "$REPO_ROOT/config/lidar-webui.service" "$TARGET:/tmp/"
+echo "[2/3] lidar-system.service neu starten (Flask, ROS-Pipeline)..."
+$SSH "$TARGET" "echo $PASS | sudo -S systemctl restart lidar-system.service"
 
-# Apply configs on target
-echo "[3/4] Applying configs..."
-$SSH "$TARGET" "echo $PASS | sudo -S bash -s" << 'EOF'
-cp /tmp/smb.conf /etc/samba/smb.conf
-cp /tmp/wifi-fallback.sh /usr/local/bin/wifi-fallback.sh
-chmod +x /usr/local/bin/wifi-fallback.sh
-cp /tmp/lidar-hotspot.service /etc/systemd/system/
-cp /tmp/lidar-hotspot.timer /etc/systemd/system/
-cp /tmp/lidar-webui.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable lidar-webui.service lidar-hotspot.timer
-systemctl enable smbd nmbd
-systemctl restart lidar-webui.service smbd nmbd
-systemctl start lidar-hotspot.timer
-EOF
-
-# Verify
-echo "[4/4] Verifying services..."
-$SSH "$TARGET" "sudo systemctl is-active lidar-webui smbd lidar-hotspot.timer 2>/dev/null"
+echo "[3/3] Status prüfen..."
+sleep 3
+$SSH "$TARGET" "systemctl is-active lidar-system.service"
+$SSH "$TARGET" "curl -s --max-time 5 http://localhost:5000/api/status | python3 -m json.tool | head -10"
 
 echo ""
-echo "=== Deploy complete ==="
+echo "=== Deploy abgeschlossen ==="
 echo "Web UI: http://$(echo $TARGET | cut -d@ -f2):5000"
-echo "Samba:  smb://$(echo $TARGET | cut -d@ -f2)/lidar_data"
