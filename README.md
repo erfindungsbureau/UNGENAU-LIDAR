@@ -98,8 +98,9 @@ Beide sind über die Web-UI per Klick wählbar. Details zum systematischen Teste
 
 ## Bekannte Probleme
 
-- **Scan-Überlagerung bei Bewegung** — wird systematisch untersucht, siehe
-  [docs/slam-staged-testing.md](docs/slam-staged-testing.md). Stand: noch nicht final gelöst.
+- **Scan-Überlagerung bei Bewegung** — gelöst (2026-06-30): falsche Extrinsik-Konvention in
+  LIO-SAMs Config (Matrix war nicht transponiert). Details und Diagnoseweg:
+  [docs/slam-staged-testing.md](docs/slam-staged-testing.md).
 - **GCC 7.5/8 Segfault auf ARM64** beim Kompilieren von FAST-LIO2 — Workaround Clang-8,
   siehe [docs/jetson-setup.md](docs/jetson-setup.md).
 - **GPS/Mag der SBG nicht in Innenräumen verlässlich** — EKF nutzt primär Beschleunigung
