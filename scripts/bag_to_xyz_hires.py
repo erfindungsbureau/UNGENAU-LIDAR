@@ -22,9 +22,15 @@ max_sec    = float(sys.argv[4]) if len(sys.argv) > 4 else None
 # 0 = deaktiviert (Standard). Sinnvoller Startwert zum Testen: 150-180.
 max_reflectivity = int(sys.argv[5]) if len(sys.argv) > 5 else 0
 
-# Extrinsic: LiDAR -> IMU (aus params.yaml)
-EXT_R = np.array([[1,0,0],[0,-1,0],[0,0,-1]], dtype=np.float64)
-EXT_T = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+# Extrinsic: LiDAR -> IMU/SBG (gemessen, siehe docs/jetson-setup.md
+# "IMU-Extrinsik-Kalibrierung". Gleiche Konvention/Richtung wie FAST-LIO2s
+# offset_R_L_I -- NICHT die transponierte Version, die LIO-SAM fuer
+# extrinsicRot braucht, siehe docs/slam-staged-testing.md fuer Details
+# zum Konventionsunterschied zwischen den beiden Engines.)
+EXT_R = np.array([[0.9973, 0.0064, 0.0730],
+                  [0.0000, 0.9962, -0.0872],
+                  [-0.0732, 0.0869, 0.9935]], dtype=np.float64)
+EXT_T = np.array([0.000, 0.030, -0.0249], dtype=np.float64)
 
 ODOM_TOPICS = ['/lio_sam/mapping/odometry', '/Odometry']  # LIO-SAM bzw. FAST-LIO2
 LIDAR_TOPIC = '/ouster/points'
