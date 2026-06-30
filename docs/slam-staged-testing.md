@@ -63,12 +63,18 @@ an der Engine/Bewegungsart selbst.
 
 - [x] Datum: 2026-06-30
 - [ ] Bag-Datei (statisch): noch ausstehend
-- [x] Bag-Datei (Bewegung): lidar_data/staged_tests/stage1_ouster_imu_20260630.bag (598 LiDAR-Frames, 59.8s)
+- [x] Bag-Datei (Bewegung, v1 ohne tatsaechliche Bewegung): stage1_ouster_imu_20260630.bag
+      (598 Frames, 16 cloud_registered)
+- [x] Bag-Datei (Bewegung, v2 MIT Bewegung): stage1_ouster_imu_20260630_v2.bag
+      (597 Frames, 13 cloud_registered, 59.8s)
 - [ ] Ergebnis statisch: noch ausstehend
-- [x] Ergebnis Bewegung: **/cloud_registered publiziert nur 16x in 60s (~0.27 Hz statt ~10 Hz)** -
-      FAST-LIO2 verarbeitet mit der Ouster-internen IMU nur einen Bruchteil der Scans. Power-Mode
-      war bereits MAXN (nicht die Ursache). Export als XYZ zur visuellen Pruefung heruntergeladen
-      (stage1_ouster_imu_slam.xyz, 265k Punkte / 16 Frames). Bewertung durch Nutzer ausstehend.
+- [x] Ergebnis Bewegung: **Bestaetigt in 2 unabhaengigen Laeufen: /cloud_registered publiziert nur
+      13-16x in 60s (~0.2-0.27 Hz statt ~10 Hz)** - FAST-LIO2 verarbeitet mit der Ouster-internen
+      IMU nur einen Bruchteil der Scans, auch bei tatsaechlicher Bewegung. Power-Mode war bereits
+      MAXN (nicht die Ursache). Das ist unabhaengig von der IMU-Qualitaet ein
+      Verarbeitungsgeschwindigkeits-Problem -> grosse Luecken zwischen Posen, was selbst eine
+      perfekte IMU nicht ausgleichen kann. XYZ-Exports heruntergeladen, visuelle Pruefung durch
+      Nutzer ausstehend.
       NEBENBEFUND: bag_to_xyz.py/bag_to_xyz_hires.py kannten nur LIO-SAM-Topics
       (/lio_sam/mapping/cloud_registered, /lio_sam/mapping/odometry), nicht FAST-LIO2s
       /cloud_registered und /Odometry -> gefixt (Commit in scripts/).
