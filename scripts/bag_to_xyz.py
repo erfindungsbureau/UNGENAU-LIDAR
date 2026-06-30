@@ -16,16 +16,19 @@ xyz_file   = sys.argv[2]
 frame_step = int(sys.argv[3])   if len(sys.argv) > 3 else 1
 max_sec    = float(sys.argv[4]) if len(sys.argv) > 4 else None
 
-SLAM_TOPIC = '/lio_sam/mapping/cloud_registered'
-RAW_TOPIC  = '/ouster/points'
+SLAM_TOPICS = ['/lio_sam/mapping/cloud_registered', '/cloud_registered']
+RAW_TOPIC   = '/ouster/points'
 
 with rosbag.Bag(bag_file, 'r') as bag:
     available = bag.get_type_and_topic_info().topics.keys()
 
-if SLAM_TOPIC in available:
-    topic = SLAM_TOPIC
-    print("Modus: SLAM-korrigiert (%s)" % SLAM_TOPIC)
-else:
+topic = None
+for t in SLAM_TOPICS:
+    if t in available:
+        topic = t
+        print("Modus: SLAM-korrigiert (%s)" % topic)
+        break
+if topic is None:
     topic = RAW_TOPIC
     print("WARNUNG: Kein SLAM-Topic im Bag -- Rohdaten werden exportiert")
     print("  (Bewegung des Scanners fuehrt zu Verzerrungen)")

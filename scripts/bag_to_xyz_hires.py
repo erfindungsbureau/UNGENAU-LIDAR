@@ -21,9 +21,9 @@ max_sec    = float(sys.argv[4]) if len(sys.argv) > 4 else None
 EXT_R = np.array([[1,0,0],[0,-1,0],[0,0,-1]], dtype=np.float64)
 EXT_T = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 
-ODOM_TOPIC  = '/lio_sam/mapping/odometry'
+ODOM_TOPICS = ['/lio_sam/mapping/odometry', '/Odometry']  # LIO-SAM bzw. FAST-LIO2
 LIDAR_TOPIC = '/ouster/points'
-SLAM_TOPIC  = '/lio_sam/mapping/cloud_registered'
+SLAM_TOPICS = ['/lio_sam/mapping/cloud_registered', '/cloud_registered']
 
 def quat_to_rot(x, y, z, w):
     n = math.sqrt(x*x + y*y + z*z + w*w)
@@ -53,11 +53,11 @@ pose_T     = []
 
 with rosbag.Bag(bag_file, 'r') as bag:
     avail = bag.get_type_and_topic_info().topics.keys()
-    has_odom  = ODOM_TOPIC  in avail
-    has_lidar = LIDAR_TOPIC in avail
-    has_slam  = SLAM_TOPIC  in avail
+    ODOM_TOPIC = next((t for t in ODOM_TOPICS if t in avail), None)
+    has_lidar  = LIDAR_TOPIC in avail
+    has_slam   = any(t in avail for t in SLAM_TOPICS)
 
-if not has_odom or not has_lidar:
+if ODOM_TOPIC is None or not has_lidar:
     if has_slam:
         print("Kein Odometry/LiDAR-Topic — fallback auf cloud_registered")
         import subprocess, sys as _sys
@@ -67,6 +67,7 @@ if not has_odom or not has_lidar:
     else:
         print("FEHLER: Weder Odometry noch SLAM-Topic gefunden.")
         sys.exit(1)
+print("Odometry-Quelle: %s" % ODOM_TOPIC)
 
 with rosbag.Bag(bag_file, 'r') as bag:
     for _, msg, t in bag.read_messages(topics=[ODOM_TOPIC]):
