@@ -75,6 +75,13 @@ Config: `ros/config/sbg_device_uart_default.yaml` (`use_enu: true`, `ros_standar
 Der Mount enthält zusätzlich historische Daten aus früheren Drohnenflügen (2019-2020,
 `Data_Aq_*`, `Test_Flights_*`) — nicht Teil dieses Projekts, aber auf derselben SSD.
 
+## Handbücher
+
+- [SBG Ellipse 2 Hardware Manual](manuals/SBG_Ellipse2_Hardware_Manual.pdf)
+- [Ouster OS1 Hardware Manual](manuals/Ouster_OS1_Hardware_Manual.pdf)
+- [Ouster OS1 Software User Guide](manuals/Ouster_OS1_Software_UserGuide.pdf)
+- [Ouster OS1 Software User Guide (v2/erweitert)](manuals/Ouster_OS1_Software_UserGuide_v2.pdf)
+
 ## Stromversorgung
 
 Jetson TX2: ~7.5W idle, ~15W unter Last. Empfohlen: USB-C PD 65W oder DC-Buchse (9–20V).
