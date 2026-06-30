@@ -156,17 +156,26 @@ egal welche IMU-Quelle. Um zu klaeren ob das Problem an FAST-LIO2 selbst liegt o
 - [x] Bag-Datei: stage_liosam_compare_20260630.bag (44.7s, mit SBG-IMU)
 - [x] **Verarbeitungsrate: 102 Frames in 44.7s = ~2.3 Hz** (FAST-LIO2 zum Vergleich: ~0.27 Hz,
       8.5x langsamer).
-- [x] **Pose-Tracking: LIO-SAM bewegt die Pose deutlich und plausibel.** Odometry-Werte sind in
-      Millimetern (nicht Metern wie bei FAST-LIO2) -- umgerechnet: Bounding-Box ca. 0.85m x 0.49m
-      x 0.15m, Gesamtstrecke ca. 2.6m ueber 45s Bewegung. Das ist eine realistische Strecke fuer
-      Herumlaufen in einem Raum.
-- [x] **Schlussfolgerung: Das Problem ist FAST-LIO2-spezifisch, nicht in den Rohdaten/Zeitstempeln
-      begruendet.** LIO-SAM verarbeitet dieselben /ouster/points + /imu/data Stroeme erfolgreich
-      mit plausibler Bewegungsschaetzung; FAST-LIO2 friert mit denselben Eingangsdaten ein.
-      Naechster Schritt: FAST-LIO2-Konfiguration gezielt debuggen (Extrinsik, Zeitsynchronisation,
-      max_iteration) statt IMU-Quelle zu wechseln. Die urspruengliche Scan-Ueberlagerung bei
-      LIO-SAM bleibt weiterhin durch die bekannte Degeneration in symmetrischen Raeumen erklaert
-      (siehe README) -- LIO-SAM trackt zwar zuverlaessig, driftet aber dort weiterhin.
+- [x] **KORREKTUR nach visueller Pruefung durch Nutzer:** Odometry-Pose bewegt sich zwar
+      (anders als bei FAST-LIO2), aber NICHT plausibel -- die exportierte Punktwolke
+      (stage_liosam_compare.xyz) zeigt viele kleine, verstreute Fragmente ueber eine riesige
+      Flaeche verteilt, statt eines zusammenhaengenden Raums. Die anfaengliche Annahme "Werte
+      sind in Millimetern, Bewegung ist plausibel" war falsch -- das Matching ist tatsaechlich
+      grossflaechig falsch, nicht nur die Einheit missverstanden.
+- [x] **Revidierte Schlussfolgerung: BEIDE Engines liefern mit dieser Bewegung fehlerhafte
+      Ergebnisse, nur auf unterschiedliche Art** -- FAST-LIO2 friert die Pose komplett ein
+      (kein Tracking), LIO-SAM trackt etwas, aber das Scan-Matching divergiert grossflaechig
+      (Fragmente ueber riesige Flaeche verstreut statt kohaerenter Raum). Das spricht GEGEN ein
+      FAST-LIO2-spezifisches Problem und FUER eine gemeinsame Ursache, z.B.:
+      (a) die Testbewegung selbst war zu schnell/ruckartig und hat Motion-Distortion in die
+      rohen Scans gebracht, die beide Algorithmen ueberfordert,
+      (b) Zeitsynchronisation LiDAR<->IMU (time_sync_en: false bei FAST-LIO2; bei LIO-SAM
+      separat zu pruefen),
+      (c) der Testraum selbst ist fuer Scan-Matching ungeeignet (zu wenig Struktur/zu
+      symmetrisch -- evtl. derselbe Raum wie bei der urspruenglichen Degenerations-Diagnose).
+      Naechster Schritt: kontrollierten Test mit sehr langsamer, gleichmaessiger Bewegung in
+      einem Raum mit viel Struktur (Moebel, Ecken) wiederholen, um Bewegungsgeschwindigkeit als
+      Variable auszuschliessen, bevor weiter an Extrinsik/Zeitsync gedreht wird.
 
 ## Ergebnis-Zusammenfassung
 
