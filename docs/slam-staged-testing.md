@@ -288,5 +288,23 @@ transponiert werden muessen).
 
 ## Ergebnis-Zusammenfassung
 
-(Nach Abschluss aller Stufen hier eintragen: wo liegt die Ursache, welche
-Engine/Config ist für den Produktivbetrieb empfohlen.)
+**Status: GELOEST (2026-06-30).** Nutzer hat stage_liosam_transpose.xyz visuell geprueft und
+bestaetigt: zusammenhaengender, plausibler Raum-Scan.
+
+**Root Cause:** Die SBG<->Ouster Extrinsik-Kalibrierung (Roll 5 Grad, Pitch 4.2 Grad, ~30mm
+Translation, aus frueherer Session gemessen) wurde nie korrekt in die SLAM-Configs uebertragen:
+1. Initial: gar nicht angewendet (Identitaet in beiden Engines).
+2. Nach Korrektur: gleiche Matrix fuer FAST-LIO2 UND LIO-SAM verwendet -- aber beide Engines
+   erwarten die Rotation in ENTGEGENGESETZTER Richtung (FAST-LIO2: LiDAR->IMU, LIO-SAM:
+   IMU->LiDAR). Fuer LIO-SAM war die Matrix transponiert noetig.
+
+**Empfehlung fuer Produktivbetrieb: LIO-SAM mit der jetzt korrigierten Extrinsik-Matrix.**
+FAST-LIO2 bleibt trotz korrekter Extrinsik strukturell eingefroren (vermutete Ursache:
+selbstverstaerkende lokale Matching-Falle ohne Loop-Closure, siehe Multi-Threading-Test oben) --
+nicht weiter verfolgt, da LIO-SAM jetzt zuverlaessig funktioniert.
+
+**Naechste Schritte (ausserhalb dieser Session):**
+- Web-UI Standard-Engine pruefen/auf LIO-SAM setzen
+- Echten vollstaendigen Scan (laenger als 45s, mehrere Raeume) zur finalen Qualitaetspruefung
+- LIO-SAMs bekannte Degeneration in symmetrischen Raeumen (langer gerader Korridor) bleibt
+  eine bekannte Grenze -- bei Bedarf in separater Session weiter untersuchen.
