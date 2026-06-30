@@ -177,6 +177,30 @@ egal welche IMU-Quelle. Um zu klaeren ob das Problem an FAST-LIO2 selbst liegt o
       einem Raum mit viel Struktur (Moebel, Ecken) wiederholen, um Bewegungsgeschwindigkeit als
       Variable auszuschliessen, bevor weiter an Extrinsik/Zeitsync gedreht wird.
 
+## Langsam-Bewegungstest (Diagnose: Geschwindigkeit als Variable ausschliessen)
+
+- [x] Datum: 2026-06-30
+- [x] Bag-Datei: stage_slow_test_20260630.bag (69s, sehr langsame/gleichmaessige Bewegung,
+      Raum mit Moebeln/Ecken bestaetigt strukturreich)
+- [x] **Bewegung bestaetigt:** SBG zeigt volle 360 Grad Yaw-Drehung waehrend der Aufnahme.
+- [x] **Kein Unterschied zur schnellen Bewegung:** 18 cloud_registered Frames (vorher 13-17),
+      Pose weiterhin eingefroren (17mm Gesamtstrecke über 70s). Geschwindigkeit/Motion-Distortion
+      ist damit als Ursache ausgeschlossen.
+- [x] **NEUER BEFUND:** "top" waehrend des Laufs zeigt fastlio_mapping konstant bei 100% CPU
+      (Single-Core, Dauerlast). Die Frame-Zahl ist über ALLE bisherigen Tests (13, 16, 17, 18)
+      auffaellig konstant bei ca. 1 Frame alle ~4 Sekunden -- unabhaengig von Aufnahmedauer,
+      Bewegungsgeschwindigkeit, IMU-Quelle oder pcd_save. Das deutet auf einen
+      **CPU-Performance-Engpass** hin: der Jetson TX2 kommt mit der FAST-LIO2-Rechenlast nicht
+      hinterher und verarbeitet nur einen Bruchteil der eingehenden 10Hz-Scans. Die grossen
+      Luecken zwischen verarbeiteten Scans (~4s) koennten dazu fuehren dass die IMU-Integration
+      ueber diese Zeitspanne fehlschlaegt oder von einer internen Plausibilitaetspruefung
+      verworfen wird, statt die Pose korrekt fortzuschreiben -- das wuerde das Einfrieren
+      erklaeren.
+- [x] **Empfohlener naechster Schritt:** Performance-Tuning statt weiterer Bewegungstests, z.B.
+      point_filter_num erhoehen (Punktdichte pro Scan reduzieren), filter_size_surf/filter_size_map
+      vergroessern, max_iteration reduzieren. Ziel: CPU-Last pro Scan senken bis FAST-LIO2 nahe
+      Echtzeit (~10Hz) mithalten kann.
+
 ## Ergebnis-Zusammenfassung
 
 (Nach Abschluss aller Stufen hier eintragen: wo liegt die Ursache, welche
