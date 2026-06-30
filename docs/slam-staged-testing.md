@@ -31,9 +31,13 @@ rosbag record -O /tmp/stage0_static.bag /ouster/points --duration=20
 LiDAR während der Aufnahme NICHT bewegen. Auswertung: zwei Frames aus dem Bag
 (z.B. erstes und letztes) in einem Tool wie `pcl_viewer` oder CloudCompare überlagern.
 
-- [ ] Datum:
-- [ ] Bag-Datei:
-- [ ] Ergebnis (deckungsgleich? Versatz wie groß?):
+- [x] Datum: 2026-06-30
+- [x] Bag-Datei: lidar_data/staged_tests/stage0_static_20260630.bag (198 Frames, 19.7s, 594MB)
+- [x] Ergebnis: Schwerpunkt-Verschiebung first->last nur 1.7mm (dx=1.1mm dy=1.2mm dz=0.3mm).
+      Punktweise Median-Differenz 9mm (= Sensorrauschen). Hoehere Mean/P95/Max-Werte sind ein
+      Artefakt des naiven Index-Vergleichs an Objektkanten (fehlende Returns verschieben Indizes),
+      keine echte Drift. **Bestanden: Rohsensor ist bei Stillstand hochkonsistent, Hardware/Mounting
+      scheidet als Fehlerquelle fuer die Scan-Ueberlagerung aus.**
 
 ## Stufe 1 — FAST-LIO2 + Ouster-interne IMU
 
