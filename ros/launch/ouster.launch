@@ -1,0 +1,21 @@
+<launch>
+  <!-- Ouster-Treiber, gestartet vom Frontend (app.py).
+       time_mode:=ros  Zeitstempel = Jetson-Uhr beim Empfang (bisheriger Betrieb)
+       time_mode:=pps  Sensor stempelt nach SBG-PPS; Rohdaten gehen auf *_pps,
+                       scripts/ouster_restamp.py rechnet auf Jetson-Zeit um und
+                       publiziert wie gewohnt /ouster/points und /ouster/imu. -->
+  <arg name="time_mode" default="ros"/>
+  <arg name="pps" value="$(eval time_mode == 'pps')"/>
+
+  <group>
+    <remap if="$(arg pps)" from="/ouster/points" to="/ouster/points_pps"/>
+    <remap if="$(arg pps)" from="/ouster/imu" to="/ouster/imu_pps"/>
+    <include file="$(find ouster_ros)/launch/sensor.launch">
+      <arg name="sensor_hostname" value="192.168.2.2"/>
+      <arg name="udp_dest" value="192.168.2.1"/>
+      <arg name="lidar_mode" value="1024x10"/>
+      <arg name="viz" value="false"/>
+      <arg name="timestamp_mode" value="$(eval 'TIME_FROM_SYNC_PULSE_IN' if pps else 'TIME_FROM_ROS_TIME')"/>
+    </include>
+  </group>
+</launch>

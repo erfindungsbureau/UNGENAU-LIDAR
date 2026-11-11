@@ -106,29 +106,47 @@ def _start_arm_timer():
                 arm_auto_timer = None
             t = threading.Thread(target=_disarm_sequence, daemon=True)
             t.start()
-        arm_auto_timer = threading.Timer(120.0, _do_auto_disarm)
+        arm_auto_timer = threading.Timer(200.0, _do_auto_disarm)
         arm_auto_timer.daemon = True
         arm_auto_timer.start()
 
 def _stop_ouster_driver():
-    patterns = ["ouster_ros", "os_nodelet", "relay_lidar", "relay_imu"]
+    patterns = ["ouster_ros", "os_nodelet", "relay_lidar", "relay_imu",
+                "launch/ouster.launch", "ouster_restamp"]
     for p in patterns:
         subprocess.run(["pkill", "-f", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2)
 
+# Zeitbasis des Ouster: "ros" = Jetson-Uhr (bisher), "pps" = SBG-PPS (+ ouster_restamp.py).
+# Datei statt Variable, damit die Wahl einen Neustart von Flask/Jetson ueberlebt.
+TIME_MODE_FILE = "/home/nvidia/config/time_mode"
+
+def get_time_mode():
+    try:
+        with open(TIME_MODE_FILE) as f:
+            return "pps" if f.read().strip() == "pps" else "ros"
+    except OSError:
+        return "ros"
+
 def _start_ouster_driver():
+    mode = get_time_mode()
+    if mode == "ros" and "SYNC_PULSE_IN" in ouster_cmd("get_config_param active timestamp_mode"):
+        # Sensor steht noch vom PPS-Betrieb auf SYNC_PULSE_IN -> zurueck auf interne Uhr
+        ouster_cmd("set_config_param timestamp_mode TIME_FROM_INTERNAL_OSC")
+        ouster_cmd("reinitialize")
+    env = {**os.environ, "ROS_MASTER_URI": "http://localhost:11311", "ROS_HOSTNAME": "localhost"}
+    ros_src = ("source /opt/ros/melodic/setup.bash && "
+               "source /home/nvidia/catkin_ws/devel/setup.bash && ")
     subprocess.Popen(
-        ["bash", "-c",
-         "source /opt/ros/melodic/setup.bash && "
-         "source /home/nvidia/catkin_ws/devel/setup.bash && "
-         "roslaunch ouster_ros sensor.launch "
-         "sensor_hostname:=192.168.2.2 udp_dest:=192.168.2.1 "
-         "lidar_mode:=1024x10 viz:=false timestamp_mode:=TIME_FROM_ROS_TIME "
-         ">> /tmp/ouster.log 2>&1"],
-        env={**os.environ,
-             "ROS_MASTER_URI": "http://localhost:11311",
-             "ROS_HOSTNAME": "localhost"}
-    )
+        ["bash", "-c", ros_src +
+         "roslaunch /home/nvidia/UNGENAU-LIDAR/ros/launch/ouster.launch time_mode:=" + mode +
+         " >> /tmp/ouster.log 2>&1"],
+        env=env)
+    if mode == "pps":
+        subprocess.Popen(
+            ["bash", "-c", ros_src +
+             "python /home/nvidia/UNGENAU-LIDAR/scripts/ouster_restamp.py >> /tmp/ouster_restamp.log 2>&1"],
+            env=env)
 
 def _arm_sequence():
     """Laeuft im Hintergrund: LiDAR einschalten → warten → SLAM starten → warten → armed."""
@@ -137,8 +155,8 @@ def _arm_sequence():
     _stop_ouster_driver()
     time.sleep(1)
     _start_ouster_driver()
-    # Warten auf lidar_ok (max 40s)
-    for _ in range(40):
+    # Warten auf lidar_ok (max 60s; nach Zeitmodus-Wechsel konfiguriert sich der Ouster ~35s neu)
+    for _ in range(60):
         with arm_lock:
             if arm_state != "arming":
                 return
@@ -475,21 +493,34 @@ def api_lidar_on():
     def _restart_ouster():
         _stop_ouster_driver()
         time.sleep(1)
-        subprocess.Popen(
-            ["bash", "-c",
-             "source /opt/ros/melodic/setup.bash && "
-             "source /home/nvidia/catkin_ws/devel/setup.bash && "
-             "roslaunch ouster_ros sensor.launch "
-             "sensor_hostname:=192.168.2.2 udp_dest:=192.168.2.1 "
-             "lidar_mode:=1024x10 viz:=false timestamp_mode:=TIME_FROM_ROS_TIME "
-             ">> /tmp/ouster.log 2>&1"],
-            env={**os.environ,
-                 "ROS_MASTER_URI": "http://localhost:11311",
-                 "ROS_HOSTNAME": "localhost"}
-        )
+        _start_ouster_driver()
     threading.Thread(target=_restart_ouster, daemon=True).start()
     msg = "LiDAR startet (~15s)..."
     return jsonify({"ok": True, "msg": msg, "set": r1, "reinit": r2})
+
+
+@app.route("/api/time_mode", methods=["GET", "POST"])
+def api_time_mode():
+    if request.method == "POST":
+        mode = (request.get_json(silent=True) or {}).get("mode", "")
+        if mode not in ("ros", "pps"):
+            return jsonify({"ok": False, "msg": "Unbekannter Zeitmodus"})
+        if arm_state != "disarmed" or is_recording():
+            return jsonify({"ok": False, "msg": "Erst DISARM, dann Zeitmodus wechseln"})
+        os.makedirs(os.path.dirname(TIME_MODE_FILE), exist_ok=True)
+        with open(TIME_MODE_FILE, "w") as f:
+            f.write(mode + "\n")
+        if is_lidar_publishing():  # laufenden Treiber sofort im neuen Modus neu starten
+            def _restart():
+                _stop_ouster_driver()
+                time.sleep(1)
+                _start_ouster_driver()
+            threading.Thread(target=_restart, daemon=True).start()
+    try:
+        locked = bool(json.loads(ouster_cmd("get_time_info"))["sync_pulse_in"]["locked"])
+    except Exception:
+        locked = None
+    return jsonify({"ok": True, "mode": get_time_mode(), "pps_locked": locked})
 
 
 @app.route("/api/lidar/mode")
@@ -521,7 +552,7 @@ def api_status():
         "scan_ready":   lidar and imu and slam_act,
         "imu_still":    _bridge_status().get("still", False),
         "arm_state":    arm_state,
-        "arm_secs_left": max(0, int(120 - (time.time() - arm_timer_start))) if arm_timer_start and arm_state == "armed" else None,
+        "arm_secs_left": max(0, int(200 - (time.time() - arm_timer_start))) if arm_timer_start and arm_state == "armed" else None,
         "export_running": is_export_running(),
         "slam_engine":  slam_engine,
         "diagnostic_mode": is_diagnostic_mode(),
@@ -570,7 +601,7 @@ def api_record_start():
         cmd = (
             "source {ros} && "
             "rosbag record -O {bag} "
-            "/ouster/points /ouster/imu "
+            "/ouster/points /ouster/imu /imu/data "  # /imu/data = SBG, fuer SLAM-Neuberechnung am Computer
             "/lio_sam/mapping/cloud_registered "
             "/lio_sam/mapping/odometry "
             "/tf /tf_static"
