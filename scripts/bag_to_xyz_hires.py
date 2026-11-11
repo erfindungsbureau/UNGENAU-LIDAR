@@ -5,8 +5,16 @@ bag_to_xyz_hires.py - Hochaufloesender XYZ Export
 Verwendet /lio_sam/mapping/odometry (Poses) + /ouster/points (rohe 65k Punkte/Frame)
 statt des downgesampelten /lio_sam/mapping/cloud_registered.
 
-Aufruf: python bag_to_xyz_hires.py input.bag output.xyz [frame_step] [max_sec] [max_reflectivity]
-# max_reflectivity: 0=aus (Standard), sonst Punkte mit Reflectivity > Wert verwerfen (gegen Spiegel/Glas)
+Aufruf: python bag_to_xyz_hires.py input.bag output.xyz [frame_step] [max_sec] [max_reflectivity] [max_pose_jump_deg] [max_pose_jump_m] [per_frame_dir]
+# max_reflectivity:   0=aus (Standard), sonst Punkte mit Reflectivity > Wert verwerfen (gegen Spiegel/Glas)
+# max_pose_jump_deg:  0=aus (Standard), sonst Rohframes verwerfen deren Pose-Intervall einen
+#                     groesseren Rotationssprung zwischen Folgeposen hat (gegen verschmierte/
+#                     verdrehte Punktwolken bei instabilem SLAM-Tracking, z.B. schnelles Neigen)
+# max_pose_jump_m:    0=aus (Standard), analog fuer Translations-Spruenge
+# per_frame_dir:      falls gesetzt, wird JEDER Rohscan als eigene Datei
+#                     frame_<Nr>_t<Sekunden>.xyz in dieses Verzeichnis geschrieben (fuer die
+#                     visuelle Einzel-Frame-Pruefung in CloudCompare), statt einer kombinierten
+#                     output.xyz. output.xyz wird in diesem Fall ignoriert.
 """
 import sys, math, bisect
 import numpy as np
@@ -20,7 +28,18 @@ max_sec    = float(sys.argv[4]) if len(sys.argv) > 4 else None
 # Reflectivity-Filter gegen Spiegelungen/Glas (spiegelnde Flaechen erzeugen oft
 # anomal hohe oder sehr inkonsistente Reflektivitaetswerte -> Geisterpunkte).
 # 0 = deaktiviert (Standard). Sinnvoller Startwert zum Testen: 150-180.
-max_reflectivity = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+max_reflectivity  = int(sys.argv[5])   if len(sys.argv) > 5 else 0
+# Pose-Qualitaets-Gate: Rohframes verwerfen, deren zeitlich umschliessendes Pose-Intervall
+# einen zu grossen Sprung zeigt (Hinweis auf instabiles/degeneriertes SLAM-Tracking statt
+# echter Bewegung). 0 = deaktiviert (Standard, bisheriges Verhalten unveraendert).
+max_pose_jump_deg = float(sys.argv[6]) if len(sys.argv) > 6 else 0.0
+max_pose_jump_m   = float(sys.argv[7]) if len(sys.argv) > 7 else 0.0
+per_frame_dir     = sys.argv[8]        if len(sys.argv) > 8 else None
+# Sammeldatei mit Frame-Nummer+Zeitstempel als Extra-Spalten (CloudCompare importiert
+# diese beim ASCII-Import als Skalarfelder -- damit lassen sich verdaechtige Frames
+# durch Einfaerben/Filtern nach Frame-Nummer direkt in EINER Datei eingrenzen, statt
+# viele Einzeldateien durchklicken zu muessen).
+with_frame_id     = (sys.argv[9] == '1')      if len(sys.argv) > 9 else False
 
 # WICHTIG: LIO-SAM verwendet extrinsicRot/extrinsicTrans NUR um rohe IMU-Vektoren
 # (acc/gyr) ins LiDAR-Koordinatensystem zu drehen (siehe utility.h: "acc = extRot*acc").
@@ -34,7 +53,12 @@ max_reflectivity = int(sys.argv[5]) if len(sys.argv) > 5 else 0
 EXT_R = np.eye(3, dtype=np.float64)
 EXT_T = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 
-ODOM_TOPICS = ['/lio_sam/mapping/odometry', '/Odometry']  # LIO-SAM bzw. FAST-LIO2
+# /odometry/imu_incremental: LIO-SAM's IMU-Preintegrations-Pose, gleiche Rate wie IMU
+# (400Hz), fuers eigene Motion-Deskewing gedacht -- deutlich praeziser als nachtraegliche
+# Interpolation zwischen den seltenen Keyframe-Posen (~2.8Hz), da der Zeitabstand zur
+# naechsten Rohscan-Zeit meist nur wenige Millisekunden betraegt statt bis zu ~350ms.
+# Wird bevorzugt verwendet, wenn im Bag vorhanden.
+ODOM_TOPICS = ['/odometry/imu_incremental', '/lio_sam/mapping/odometry', '/Odometry']
 LIDAR_TOPIC = '/ouster/points'
 SLAM_TOPICS = ['/lio_sam/mapping/cloud_registered', '/cloud_registered']
 
@@ -58,6 +82,12 @@ def slerp_quat(q1, q2, t):
     sin0   = math.sin(theta0)
     return (math.sin(theta0-theta)/sin0)*q1 + (math.sin(theta)/sin0)*q2
 
+def quat_angle_deg(q1, q2):
+    """Rotationswinkel (Grad) zwischen zwei Quaternionen -- Mass fuer Pose-Sprung."""
+    dot = abs(np.dot(q1, q2))
+    dot = min(1.0, dot)
+    return math.degrees(2*math.acos(dot))
+
 # Odometry einlesen
 print("Lese Odometry-Poses...")
 pose_times = []
@@ -73,7 +103,7 @@ with rosbag.Bag(bag_file, 'r') as bag:
 
 if ODOM_TOPIC is None or not has_lidar:
     if has_slam:
-        print("Kein Odometry/LiDAR-Topic — fallback auf cloud_registered")
+        print("Kein Odometry/LiDAR-Topic -- fallback auf cloud_registered")
         import subprocess, sys as _sys
         r = subprocess.call([_sys.executable,
             '/home/nvidia/UNGENAU-LIDAR/scripts/bag_to_xyz.py', bag_file, xyz_file] + sys.argv[3:])
@@ -82,6 +112,13 @@ if ODOM_TOPIC is None or not has_lidar:
         print("FEHLER: Weder Odometry noch SLAM-Topic gefunden.")
         sys.exit(1)
 print("Odometry-Quelle: %s" % ODOM_TOPIC)
+# Bei der hochfrequenten IMU-Inkremental-Pose wird NICHT interpoliert (naechster
+# Nachbar genuegt bei ~400Hz / max ~2.5ms Abstand) -- das eliminiert die Fehlerquelle
+# "ungenaue Interpolation ueber grosse Zeitluecken", die bei den seltenen Keyframe-Posen
+# (~2.8Hz, bis ~350ms Abstand) sichtbaren Frame-zu-Frame-Versatz verursacht hat.
+USE_NEAREST = (ODOM_TOPIC == '/odometry/imu_incremental')
+if USE_NEAREST:
+    print("Hochfrequente Pose erkannt -- Naechster-Nachbar statt Interpolation (praeziser).")
 
 with rosbag.Bag(bag_file, 'r') as bag:
     for _, msg, t in bag.read_messages(topics=[ODOM_TOPIC]):
@@ -97,13 +134,47 @@ if not pose_times:
     print("FEHLER: Keine Odometry-Daten im Bag.")
     sys.exit(1)
 
+# Pose-Qualitaets-Gate vorbereiten: interval_bad[idx] = Intervall zwischen
+# pose_times[idx-1] und pose_times[idx] gilt als unzuverlaessig (Rotations- oder
+# Translationssprung ueber Schwellwert -- deutet auf SLAM-Tracking-Ausfall statt
+# echter Bewegung hin, siehe docs/slam-staged-testing.md).
+interval_bad = [False] * len(pose_times)
+n_bad_intervals = 0
+if max_pose_jump_deg > 0 or max_pose_jump_m > 0:
+    for i in range(1, len(pose_times)):
+        bad = False
+        if max_pose_jump_deg > 0:
+            rot_jump = quat_angle_deg(pose_Q[i-1], pose_Q[i])
+            if rot_jump > max_pose_jump_deg:
+                bad = True
+        if max_pose_jump_m > 0:
+            trans_jump = np.linalg.norm(pose_T[i] - pose_T[i-1])
+            if trans_jump > max_pose_jump_m:
+                bad = True
+        interval_bad[i] = bad
+        if bad:
+            n_bad_intervals += 1
+    print("  Pose-Qualitaets-Gate aktiv: %d von %d Intervallen als unzuverlaessig markiert "
+          "(Schwellwerte: %.1f Grad, %.2f m)" % (n_bad_intervals, len(pose_times)-1,
+                                                   max_pose_jump_deg, max_pose_jump_m))
+
 def get_pose(ts):
-    """Pose per linearer Interpolation zwischen naechsten 2 Eintraegen."""
+    """Pose zum Zeitpunkt ts. Bei hochfrequenter IMU-Inkremental-Pose (USE_NEAREST):
+    naechster Nachbar (kein Interpolationsfehler bei ~400Hz moeglich). Sonst lineare
+    Interpolation/Slerp zwischen den naechsten 2 Keyframe-Eintraegen. Gibt zusaetzlich
+    zurueck, ob das genutzte Intervall als unzuverlaessig markiert ist (Pose-Qualitaets-
+    Gate, siehe max_pose_jump_deg/max_pose_jump_m -- nur relevant ohne USE_NEAREST)."""
     idx = bisect.bisect_left(pose_times, ts)
     if idx == 0:
-        return pose_R[0], pose_T[0]
+        return pose_R[0], pose_T[0], False
     if idx >= len(pose_times):
-        return pose_R[-1], pose_T[-1]
+        return pose_R[-1], pose_T[-1], False
+
+    if USE_NEAREST:
+        t0, t1 = pose_times[idx-1], pose_times[idx]
+        nearest = idx-1 if (ts - t0) <= (t1 - ts) else idx
+        return pose_R[nearest], pose_T[nearest], False
+
     t0, t1 = pose_times[idx-1], pose_times[idx]
     alpha = (ts - t0) / (t1 - t0) if t1 > t0 else 0.0
     # Lineare Interpolation Translation
@@ -113,16 +184,23 @@ def get_pose(ts):
     # der Punktwolke zwischen aufeinanderfolgenden Rohscans)
     q_interp = slerp_quat(pose_Q[idx-1], pose_Q[idx], alpha)
     R_interp = quat_to_rot(q_interp[0], q_interp[1], q_interp[2], q_interp[3])
-    return R_interp, t_interp
+    return R_interp, t_interp, interval_bad[idx]
 
 # Export
+if per_frame_dir:
+    import os
+    if not os.path.isdir(per_frame_dir):
+        os.makedirs(per_frame_dir)
+    print("Einzel-Frame-Export nach: %s" % per_frame_dir)
 print("Exportiere Punkte...")
 count = 0
 frame = 0
 t0    = None
 ts    = 0
+n_skipped_unreliable = 0
 
-with open(xyz_file, 'w') as f_out:
+f_out = None if per_frame_dir else open(xyz_file, 'w')
+try:
     with rosbag.Bag(bag_file, 'r') as bag:
         for _, msg, t in bag.read_messages(topics=[LIDAR_TOPIC]):
             ts = t.to_sec()
@@ -134,7 +212,10 @@ with open(xyz_file, 'w') as f_out:
             if frame % frame_step != 0:
                 continue
 
-            R_odom, t_odom = get_pose(ts)
+            R_odom, t_odom, unreliable = get_pose(ts)
+            if unreliable:
+                n_skipped_unreliable += 1
+                continue
 
             if max_reflectivity > 0:
                 raw = np.array(list(pc2.read_points(
@@ -159,13 +240,30 @@ with open(xyz_file, 'w') as f_out:
             # IMU -> Welt Frame
             pts_world = np.dot(R_odom, pts_imu.T).T + t_odom
 
-            for pw in pts_world:
-                f_out.write('%.4f %.4f %.4f\n' % (pw[0], pw[1], pw[2]))
-                count += 1
+            if per_frame_dir:
+                fname = os.path.join(per_frame_dir, "frame_%04d_t%.2f.xyz" % (frame, ts - t0))
+                with open(fname, 'w') as ff:
+                    for pw in pts_world:
+                        ff.write('%.4f %.4f %.4f\n' % (pw[0], pw[1], pw[2]))
+                        count += 1
+            elif with_frame_id:
+                trel = ts - t0
+                for pw in pts_world:
+                    f_out.write('%.4f %.4f %.4f %d %.2f\n' % (pw[0], pw[1], pw[2], frame, trel))
+                    count += 1
+            else:
+                for pw in pts_world:
+                    f_out.write('%.4f %.4f %.4f\n' % (pw[0], pw[1], pw[2]))
+                    count += 1
 
             if frame % 50 == 0:
                 elapsed = ts - t0
-                print("  Frame %d / %.1fs — %d Punkte bisher" % (frame, elapsed, count))
+                print("  Frame %d / %.1fs -- %d Punkte bisher" % (frame, elapsed, count))
+finally:
+    if f_out:
+        f_out.close()
 
 elapsed = (ts - t0) if t0 else 0
 print("Fertig: %d Punkte, %d Frames, %.1fs" % (count, frame, elapsed))
+if max_pose_jump_deg > 0 or max_pose_jump_m > 0:
+    print("Pose-Qualitaets-Gate: %d Rohframes wegen unzuverlaessiger Pose verworfen" % n_skipped_unreliable)

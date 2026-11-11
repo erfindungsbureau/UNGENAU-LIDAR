@@ -308,3 +308,50 @@ nicht weiter verfolgt, da LIO-SAM jetzt zuverlaessig funktioniert.
 - Echten vollstaendigen Scan (laenger als 45s, mehrere Raeume) zur finalen Qualitaetspruefung
 - LIO-SAMs bekannte Degeneration in symmetrischen Raeumen (langer gerader Korridor) bleibt
   eine bekannte Grenze -- bei Bedarf in separater Session weiter untersuchen.
+
+
+## Phase 2 (2026-07-16/17): Punktdichte/Export-Qualitaet nach Extrinsik-Fix
+
+Nach dem geloesten Extrinsik-Bug: Nutzer bemerkte beim Hi-Res-Export (volle Rohpunkte statt
+downgesampelter Feature-Punkte) weiterhin sichtbaren Frame-zu-Frame-Versatz bei Scans mit
+Neigung (Pitch/Roll), obwohl die grobe Trajektorie plausibel aussah.
+
+**Befunde:**
+- LIO-SAMs eingebaute Degenerations-Erkennung (`isDegenerate`, Eigenwert-Analyse in
+  `mapOptmization.cpp`) war bisher nicht sichtbar gemacht -- ROS_WARN_THROTTLE-Log ergaenzt
+  (Patch, da LIO-SAM ausserhalb des Git-Repos liegt wie FAST_LIO).
+- Bei einem Neigungs-Scan (`quality_test_tilt3`, 123s): 35 Degenerations-Warnungen, 18
+  Pose-Spruenge (>0.4m), 39 Rotations-Spruenge zwischen Keyframe-Posen (>15 Grad, bis 63.8
+  Grad). Korrelation zwischen beiden Metriken nur teilweise (2 von vielen Faellen exakt
+  ueberlappend) -- Degeneration erklaert nicht die gesamte Verzerrung.
+- Export-Skript-Filter (Frames mit grossem Rotations-/Translationssprung zwischen
+  Keyframe-Posen verwerfen) brachte KEINE sichtbare Verbesserung -- Ursache lag also nicht in
+  einzelnen Sprung-Ereignissen zwischen Keyframes.
+- **Root Cause gefunden:** Rohscans (10Hz) wurden per linearer Interpolation/Slerp zwischen den
+  seltenen LIO-SAM-Keyframe-Posen (`/lio_sam/mapping/odometry`, ~2.8Hz, bis ~350ms Abstand)
+  platziert. Bei ungleichfoermiger Bewegung zwischen zwei Keyframes (typisch bei Neigen)
+  erzeugt diese Interpolation einen sichtbaren, aber kleinen Versatz zwischen benachbarten
+  Rohframes -- von Auge klar erkennbar und korrigierbar, aber nicht durch Sprung-Schwellwerte
+  fassbar.
+- **Fix:** LIO-SAM publiziert bereits eine IMU-Preintegrations-Pose auf
+  `/odometry/imu_incremental` (Topic-Name aus `odomTopic`-Param + Suffix), mit IMU-Rate
+  (~200-400Hz) statt der ~2.8Hz Keyframe-Rate -- genau fuer Motion-Deskewing gedacht.
+  `bag_to_xyz_hires.py` nutzt dieses Topic jetzt bevorzugt (Naechster-Nachbar statt
+  Interpolation, da Zeitabstand zu jedem Rohscan meist <5ms betraegt).
+- **Ergebnis (`quality_test_tilt4`, 81s, Nutzer-Review):** "noch nicht perfekt aber viel
+  besser" -- deutliche Verbesserung bestaetigt, Restfehler vorhanden.
+
+**Offene Punkte / naechste Schritte:**
+- Verbleibender Restfehler nach dem Interpolations-Fix noch nicht diagnostiziert -- moegliche
+  Ursachen: Extrinsik-Kalibrierung Ouster<->SBG nicht perfekt, Software-Zeitstempel
+  (`timestamp_mode:=TIME_FROM_ROS_TIME` beim Ouster-Treiber nutzt Ankunftszeit statt
+  Sensor-eigener Uhr -- Jitter durch USB/Netzwerk/OS-Scheduling), oder verbleibende
+  IMU-Preintegrations-Drift zwischen Keyframe-Korrekturen.
+- **Hardware-Zeitsynchronisation (PPS) als naechster, fundamentalerer Schritt diskutiert:**
+  Ouster OS1 und SBG Ellipse 2 haben beide Sync-Pins (PPS Master/Slave). Aktuell werden
+  LiDAR-Punkte und IMU-Samples nur software-seitig zeitlich korreliert. Mit PPS-Hardware-Sync
+  (Ouster auf `timestamp_mode:=TIME_FROM_SYNC_PULSE_IN` umstellen, SBG als Zeitreferenz) waere
+  die Zeit-Korrelation hardware-praezise statt jitter-behaftet. Erfordert physisches Verkabeln
+  der Sync-Pins (Pin-Belegung siehe `docs/manuals/`) -- noch nicht umgesetzt.
+- Bekannter Nebenbefund: `CATKIN_WHITELIST_PACKAGES=fast_lio` blockierte seit Ende Juni
+  stillschweigend alle lio_sam-Rebuilds -- behoben (Whitelist geleert).
