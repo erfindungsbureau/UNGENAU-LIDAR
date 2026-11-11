@@ -45,15 +45,36 @@ für den laufenden Update-Workflow.
 
 ## SBG Ellipse 2 IMU — Anschluss
 
-Port: `/dev/ttyUSB0`, Baud: 115200 (via `sbg_driver`, RS-422 über FTDI-Adapter).
+Port: `/dev/sbg`, Baud: 921600 (via `sbg_driver`, RS-422 über FTDI-Adapter),
+Konfiguration in `ros/config/sbg_device_uart_default.yaml`.
 
-FTDI RS-422 Pinout:
+**udev-Regel (liegt nicht im Repo, nach Neuinstallation neu anlegen).** Der FTDI-Adapter
+meldet sich je nach Reihenfolge als `ttyUSB0` oder `ttyUSB1`, deshalb fester Name:
+
+```bash
+echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="sbg"' \
+  | sudo tee /etc/udev/rules.d/99-sbg.rules
+sudo udevadm control --reload && sudo udevadm trigger
 ```
-FTDI RXD+ (Gelb)  ← SBG TX+
-FTDI RXD- (Grün)  ← SBG TX-
-FTDI TXD+ (Orange)→ SBG RX+
-FTDI TXD- (Rot)   → SBG RX-
-```
+
+Verkabelung FTDI-Kabel (9 Adern) → 8-pol. Aviatikstecker → Harwin-Stecker der SBG,
+Pin-Nummern an Aviatik- und Harwin-Stecker identisch:
+
+| Pin | Signal SBG | Ader |
+|---|---|---|
+| 1 | GND | schwarz (+ grau, blau) |
+| 2 | Rx+ | orange (FTDI TXD+) |
+| 3 | Tx+ | gelb (FTDI RXD+) |
+| 4 | SYNC A (PPS-Ausgang) | braun → Ouster-Box `PPS_SLAVE` |
+| 6 | VIN 12 V (4–15 V) | türkis, über 0.5-A-Sicherung |
+| 7 | Rx- | rot (FTDI TXD-) |
+| 8 | Tx- | violett (FTDI RXD-) |
+
+Braun, grau, türkis und blau sind am FTDI-Chip abgelötet. SYNC A verträgt höchstens 4 V.
+
+SBG-Einstellungen im Gerät (gesetzt 11.11.2026 nach Werksreset): IMU_DATA, EKF_QUAT und
+EKF_EULER mit 200 Hz, STATUS 1 Hz, SYNC A = PPS, PORT A = 921600 Baud RS-422.
+Die Magnetometer-Kalibrierung ging beim Werksreset verloren.
 
 Falls Permission-Fehler: `sudo usermod -a -G dialout nvidia` (Neuanmeldung nötig).
 
@@ -107,6 +128,12 @@ sudo jetson_clocks   # CPU/GPU-Takt fixieren
 
 ## Bekannte Einschränkungen
 
+- **FAST-LIO2 muss mit `-O3` gebaut sein.** In `~/catkin_ws/src/FAST_LIO/CMakeLists.txt`
+  (nicht im Repo) stand `set( CMAKE_CXX_FLAGS "-std=c++14 -O0" )`. Damit verarbeitet der
+  Jetson nur 0.34 Scans/s statt 10. Mit `-O3` und Clang-8 läuft es in Echtzeit
+  (gemessen 11.11.2026, stationär, ~140 % CPU). Neu bauen:
+  `cd ~/catkin_ws && catkin_make --pkg fast_lio -j2` (ca. 6 Minuten).
+  Zum Vergleich: LIO-SAM verarbeitet auf dem TX2 nur etwa 46 % der Scans.
 - **GCC 7.5/8 Segfault auf ARM64** beim Kompilieren von `FAST_LIO/laserMapping.cpp` (Compiler-Bug
   bei tiefer Template-Instanziierung) → Workaround: Clang-8 (`apt install clang-8`,
   `-DCMAKE_CXX_COMPILER=/usr/bin/clang++-8`).
