@@ -29,7 +29,7 @@ sleep 5
 echo "[LiDAR] ouster_ros wird per ARM gestartet — übersprungen" | tee -a $LOG_DIR/lidar_start.log
 
 # 5. SBG IMU Reader + NED->ENU Konverter
-if [ -e /dev/ttyUSB0 ]; then
+if [ -e /dev/sbg ]; then
     echo "[IMU] sbg_driver (EKF+ENU) -> /imu/data ..." | tee -a $LOG_DIR/lidar_start.log
     nohup bash -c "source /opt/ros/melodic/setup.bash && source /home/nvidia/catkin_ws/devel/setup.bash && roslaunch /home/nvidia/UNGENAU-LIDAR/ros/launch/sbg_device.launch" \
         > $LOG_DIR/sbg.log 2>&1 &

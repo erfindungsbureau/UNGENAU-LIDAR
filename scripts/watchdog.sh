@@ -15,7 +15,7 @@ start_bridge() {
 
 start_sbg_driver() {
     log "SBG_DRIVER: Starte sbg_driver + combiner..."
-    nohup bash -c "$ROS_ENV && roslaunch sbg_driver sbg_device.launch" > /tmp/sbg_driver.log 2>&1 &
+    nohup bash -c "$ROS_ENV && roslaunch /home/nvidia/UNGENAU-LIDAR/ros/launch/sbg_device.launch" > /tmp/sbg_driver.log 2>&1 &
     sleep 5
     nohup bash -c "$ROS_ENV && python /home/nvidia/UNGENAU-LIDAR/scripts/sbg_imu_combiner.py" > /tmp/sbg_combiner.log 2>&1 &
     sleep 2
@@ -26,11 +26,11 @@ start_sbg_driver() {
 log "=== Watchdog gestartet ==="
 
 pgrep -f "python2.*bridge.py" > /dev/null || start_bridge
-pgrep -f "sbg_device" > /dev/null || ([ -e /dev/ttyUSB0 ] && start_sbg_driver)
+pgrep -f "sbg_device" > /dev/null || ([ -e /dev/sbg ] && start_sbg_driver)
 
 while true; do
     pgrep -f "python2.*bridge.py" > /dev/null || { log "BRIDGE: Prozess weg!"; start_bridge; }
-    if [ -e /dev/ttyUSB0 ]; then
+    if [ -e /dev/sbg ]; then
         pgrep -f "sbg_device" > /dev/null || { log "SBG_DRIVER: Prozess weg!"; start_sbg_driver; }
         pgrep -f "sbg_imu_combiner" > /dev/null || {
             pgrep -f "sbg_device" > /dev/null && {
