@@ -380,6 +380,7 @@ setInterval(async () => {
     updateBanner(!!d.lidar, !!d.imu, !!d.slam_active, d.arm_state || 'disarmed');
     updateArmBtn(d.arm_state || 'disarmed', d.arm_secs_left);
     slamOn = !!d.slam;
+    if (d.slam_engine && d.slam_engine !== selectedEngine) setEngine(d.slam_engine, false);
   } catch(e) {}
 }, 2000);
 
@@ -810,9 +811,9 @@ function dlExport() {
 
 // ── SLAM Engine ───────────────────────────────────────────────────────────────
 let selectedEngine = 'lio_sam';
-function setEngine(engine) {
+function setEngine(engine, send = true) {   // send=false: nur Anzeige an den Stand des Jetson angleichen
   selectedEngine = engine;
-  fetch('/api/slam/engine', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({engine})});
+  if (send) fetch('/api/slam/engine', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({engine})});
   const lio  = document.getElementById('eng-lio');
   const flio = document.getElementById('eng-flio');
   lio.style.borderColor  = engine==='lio_sam'  ? 'var(--c-green)' : 'var(--c-border)';
