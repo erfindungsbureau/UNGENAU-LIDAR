@@ -218,7 +218,10 @@
   <!-- Diagnose Panel -->
   <div id="diag-panel" class="panel" style="display:none">
     <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
-      <span>Diagnose</span>
+      <span style="display:flex;align-items:center;gap:6px">Diagnose
+        <button id="dv-scan" onclick="setDiagView('scan')" style="padding:2px 8px;font-family:var(--font);font-size:10px;border-radius:var(--r);border:1px solid var(--c-blue);background:none;color:var(--c-blue);cursor:pointer">Scan</button>
+        <button id="dv-map" onclick="setDiagView('map')" style="padding:2px 8px;font-family:var(--font);font-size:10px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:var(--c-muted);cursor:pointer">Karte</button>
+      </span>
       <button onclick="toggleDiag()" style="background:none;border:none;color:var(--c-muted);font-size:12px;cursor:pointer">✕ schliessen</button>
     </div>
     <canvas id="scan-canvas" width="320" height="360" style="width:100%;border-radius:6px;background:#050e14;display:block"></canvas>
@@ -856,7 +859,8 @@ function showWifi(d) {
     const name = document.createElement('span'), info = document.createElement('span');
     name.textContent = (on ? '● ' : '○ ') + n.ssid;
     name.style.color = on ? 'var(--c-green)' : n.signal ? 'inherit' : 'var(--c-muted)';
-    info.textContent = n.signal ? n.signal + ' %' : 'nicht in Reichweite';
+    // Signal nur aus der letzten Suche: als verbundener Client sucht der Jetson selten, fehlend heisst nicht «weg»
+    info.textContent = n.signal ? n.signal + ' %' : '–';
     info.style.color = 'var(--c-muted)';
     row.append(name, info);
     return row;
@@ -936,9 +940,61 @@ function renderFrame(pts, imu) {
   const ctx = cv.getContext('2d');
   const W = cv.width, H = cv.height;
   ctx.clearRect(0, 0, W, H);
-  drawTopDown(ctx, W, pts);
+  if (diagView === 'map') drawMap(ctx, W, mapData);
+  else drawTopDown(ctx, W, pts);
   drawSpiritLevel(ctx, W, imu);
-  document.getElementById('scan-pts-count').textContent = pts.length + ' Punkte';
+  document.getElementById('scan-pts-count').textContent = diagView === 'map'
+    ? (mapData.cells || []).length + ' Kartenzellen à ' + Math.round((mapData.res || 0.1) * 100) + ' cm'
+    : pts.length + ' Punkte';
+}
+
+// ── Karte: Grundriss aus dem SLAM (bridge.py → /tmp/map_2d.json) ─────────────
+let diagView = 'scan', mapData = {}, mapFetched = 0;
+function setDiagView(v) {
+  diagView = v; mapFetched = 0;
+  for (const [id, m] of [['dv-scan', 'scan'], ['dv-map', 'map']]) {
+    const b = document.getElementById(id), on = v === m;
+    b.style.borderColor = on ? 'var(--c-blue)' : 'var(--c-border)';
+    b.style.color       = on ? 'var(--c-blue)' : 'var(--c-muted)';
+  }
+}
+
+function drawMap(ctx, W, m) {
+  const cells = m.cells || [], path = m.path || [], res = m.res || 0.1;
+  ctx.fillStyle = '#050e14'; ctx.fillRect(0, 0, W, SCAN_H);
+  if (!cells.length) {
+    ctx.fillStyle = '#546e7a'; ctx.font = '11px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('Noch keine Karte — SLAM läuft nicht', W / 2, SCAN_H / 2);
+    ctx.textAlign = 'left';
+    return;
+  }
+  // Ausschnitt: alle Zellen und der Weg, gleiche Massstäbe in X und Y. Welt-X nach oben, Welt-Y nach links.
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [i, j] of cells) { x0 = Math.min(x0, i * res); x1 = Math.max(x1, (i + 1) * res); y0 = Math.min(y0, j * res); y1 = Math.max(y1, (j + 1) * res); }
+  for (const [x, y] of path) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const pad = 10, scale = Math.min((W - 2 * pad) / (y1 - y0 || 1), (SCAN_H - 2 * pad) / (x1 - x0 || 1));
+  const ox = W / 2 + (y0 + y1) / 2 * scale, oy = SCAN_H / 2 + (x0 + x1) / 2 * scale;
+  const sx = y => ox - y * scale, sy = x => oy - x * scale;
+
+  ctx.fillStyle = '#00e5ff';
+  const s = Math.max(1, res * scale);
+  for (const [i, j] of cells) ctx.fillRect(sx((j + 1) * res), sy((i + 1) * res), s, s);
+
+  if (path.length > 1) {
+    ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 1.5; ctx.beginPath();
+    path.forEach(([x, y], k) => k ? ctx.lineTo(sx(y), sy(x)) : ctx.moveTo(sx(y), sy(x)));
+    ctx.stroke();
+  }
+  if (m.pose) {
+    const [x, y, yaw] = m.pose, px = sx(y), py = sy(x);
+    ctx.strokeStyle = '#ff5722'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(px, py); ctx.lineTo(px - Math.sin(yaw) * 14, py - Math.cos(yaw) * 14); ctx.stroke();
+    ctx.fillStyle = '#ff5722'; ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+  }
+  // Massstab 1 m
+  ctx.strokeStyle = '#546e7a'; ctx.lineWidth = 2; ctx.beginPath();
+  ctx.moveTo(8, SCAN_H - 8); ctx.lineTo(8 + scale, SCAN_H - 8); ctx.stroke();
+  ctx.fillStyle = '#546e7a'; ctx.font = '9px monospace'; ctx.fillText('1 m', 12 + scale, SCAN_H - 5);
 }
 
 function drawTopDown(ctx, W, pts) {
@@ -1053,6 +1109,10 @@ function drawSpiritLevel(ctx, W, imu) {
 // ── Diagnose Polling ──────────────────────────────────────────────────────────
 async function pollDiag() {
   try {
+    if (diagView === 'map' && Date.now() - mapFetched > 1000) {   // Karte nur 1× pro Sekunde
+      mapFetched = Date.now();
+      mapData = await fetch('/api/map_2d').then(r => r.json());
+    }
     const [scan, imu] = await Promise.all([
       fetch('/api/scan_preview').then(r => r.json()),
       fetch('/api/imu').then(r => r.json()),

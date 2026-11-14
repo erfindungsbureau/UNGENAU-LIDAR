@@ -671,6 +671,17 @@ def api_scan_preview():
         return jsonify({"pts": [], "t": 0})
 
 
+@app.route("/api/map_2d")
+def api_map_2d():
+    try:
+        with open("/tmp/map_2d.json") as f:
+            resp = Response(f.read(), mimetype="application/json")
+        resp.headers["Cache-Control"] = "no-cache, no-store"
+        return resp
+    except Exception:
+        return jsonify({"cells": [], "path": [], "pose": None})
+
+
 @app.route("/api/imu")
 def api_imu():
     try:

@@ -5,7 +5,7 @@
 # Läuft als root (wifi-watchdog.service). Netze: /home/nvidia/config/wifi.conf
 # Format: Zeile "SSID|PASSWORT" unter [known_networks]; SSID darf Leerzeichen enthalten.
 
-CONFIG="/home/nvidia/config/wifi.conf"
+CONFIG="${WIFI_CONF:-/home/nvidia/config/wifi.conf}"  # WIFI_CONF nur für Tests
 LOG="/tmp/wifi.log"
 MODE_FILE="/tmp/wifi_mode"
 AP_SSID="LidarScanner"
