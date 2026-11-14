@@ -13,7 +13,9 @@ source /home/nvidia/catkin_ws/devel/setup.bash
 echo "[$(date)] === LiDAR System Start ===" | tee $LOG_DIR/lidar_start.log
 
 # 1. WiFi / Hotspot
-bash /home/nvidia/UNGENAU-LIDAR/scripts/wifi_ap.sh >> $LOG_DIR/lidar_start.log 2>&1
+# WLAN macht wifi-watchdog.service (root): alle bekannten Netze aus config/wifi.conf, sonst Hotspot.
+# Hier nur bis 30 s auf eine Adresse warten, damit die Web-Adresse im Log stimmt.
+for i in $(seq 1 30); do ip -4 addr show wlan0 | grep -q inet && break; sleep 1; done
 IP=$(ip -4 addr show wlan0 | grep -oP "(?<=inet )[\d.]+" | head -1)
 
 # 2. Alte Prozesse beenden

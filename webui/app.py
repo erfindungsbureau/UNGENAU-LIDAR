@@ -14,7 +14,7 @@ BAGS_DIR  = os.path.join(DATA_DIR, "bags")
 MAPS_DIR  = os.path.join(DATA_DIR, "maps")
 ROS_SETUP = "/opt/ros/melodic/setup.bash"
 
-OUSTER_IP   = "192.168.2.2"
+OUSTER_IP   = "169.254.45.204"  # Link-Local, kollidiert mit keinem WLAN-Netz
 OUSTER_PORT = 7501
 
 def ouster_cmd(cmd, timeout=3):
@@ -523,6 +523,104 @@ def api_time_mode():
     return jsonify({"ok": True, "mode": get_time_mode(), "pps_locked": locked})
 
 
+# ── WLAN: bekannte Netze (wifi-watchdog.service verbindet, sonst Hotspot) ──────
+WIFI_CONF = "/home/nvidia/config/wifi.conf"
+wifi_lock = threading.Lock()
+
+
+def _wifi_lines():
+    with open(WIFI_CONF) as f:
+        return f.read().splitlines()
+
+
+def _wifi_known(lines):
+    """SSIDs unter [known_networks], Format SSID|PASSWORT (Passwörter verlassen den Jetson nie)."""
+    out, sec = [], ""
+    for s in lines:
+        t = s.strip()
+        if t.startswith("["):
+            sec = t.strip("[]")
+        elif sec == "known_networks" and "|" in t and not t.startswith("#"):
+            out.append(t.split("|", 1)[0])
+    return out
+
+
+def _wifi_set(lines, ssid, password):
+    """Netz ersetzen oder am Ende von [known_networks] einfügen."""
+    sec, last, entry = "", None, ssid + "|" + password
+    for i, s in enumerate(lines):
+        t = s.strip()
+        if t.startswith("["):
+            sec = t.strip("[]")
+            if sec == "known_networks":
+                last = i
+        elif sec == "known_networks" and "|" in t and not t.startswith("#"):
+            if t.split("|", 1)[0] == ssid:
+                return lines[:i] + [entry] + lines[i + 1:]
+            last = i
+    if last is None:
+        return lines + ["", "[known_networks]", entry]
+    return lines[:last + 1] + [entry] + lines[last + 1:]
+
+
+def _wifi_check(ssid, password):
+    if not ssid or len(ssid.encode("utf-8")) > 32:
+        return "Netzname muss 1–32 Zeichen lang sein"
+    if not 8 <= len(password) <= 63:
+        return "Passwort muss 8–63 Zeichen lang sein"
+    if any(c in "|\r\n" or ord(c) < 32 for c in ssid + password):
+        return "Zeichen | und Zeilenumbrüche sind nicht erlaubt"
+    return None
+
+
+@app.route("/api/wifi", methods=["GET", "POST"])
+def api_wifi():
+    if request.method == "POST":
+        d = request.get_json(silent=True) or {}
+        ssid, password = str(d.get("ssid", "")).strip(), str(d.get("password", ""))
+        err = _wifi_check(ssid, password)
+        if err:
+            return jsonify({"ok": False, "msg": err})
+        with wifi_lock:
+            lines = _wifi_set(_wifi_lines(), ssid, password)
+            tmp = WIFI_CONF + ".tmp"
+            with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+                f.write("\n".join(lines) + "\n")
+            os.replace(tmp, WIFI_CONF)
+    try:
+        out = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SIGNAL,SSID", "dev", "wifi", "list"],
+                             stdout=subprocess.PIPE, universal_newlines=True, timeout=5).stdout
+    except Exception:
+        out = ""
+    seen, current = {}, ""
+    for row in out.splitlines():
+        active, sig, ssid = (row.split(":", 2) + ["", ""])[:3]
+        ssid = ssid.replace("\\:", ":")
+        if ssid:
+            seen[ssid] = max(seen.get(ssid, 0), int(sig or 0))
+            if active == "yes":
+                current = ssid
+    try:
+        mode = open("/tmp/wifi_mode").read().strip()
+    except Exception:
+        mode = "unknown"
+    nets = [{"ssid": s, "signal": seen.get(s)} for s in _wifi_known(_wifi_lines())]
+    return jsonify({"ok": True, "mode": mode, "current": current, "known": nets})
+
+
+def _wifi_selftest():
+    base = ["# x", "[known_networks]", "A|aaaaaaaa", "B c|bbbbbbbb", "", "[hotspot]", "SSID=L"]
+    assert _wifi_known(base) == ["A", "B c"]
+    assert _wifi_set(base, "B c", "neu12345")[3] == "B c|neu12345"
+    r = _wifi_set(base, "D", "dddddddd")
+    assert r[4] == "D|dddddddd" and r[6] == "[hotspot]" and _wifi_known(r) == ["A", "B c", "D"]
+    assert _wifi_known(_wifi_set(["[hotspot]"], "E", "eeeeeeee")) == ["E"]
+    assert _wifi_check("x|y", "12345678") and _wifi_check("ok", "kurz") and not _wifi_check("iPhone F", "12345678")
+
+
+_wifi_selftest()
+
+
 @app.route("/api/lidar/mode")
 def api_lidar_mode():
     r = ouster_cmd("get_config_param active")
@@ -604,6 +702,7 @@ def api_record_start():
             "/ouster/points /ouster/imu /imu/data "  # /imu/data = SBG, fuer SLAM-Neuberechnung am Computer
             "/lio_sam/mapping/cloud_registered "
             "/lio_sam/mapping/odometry "
+            "/Odometry /cloud_registered "  # FAST-LIO2-Ausgabe
             "/tf /tf_static"
         ).format(ros=ROS_SETUP, bag=bag_path)
         proc = subprocess.Popen(

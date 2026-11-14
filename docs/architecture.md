@@ -87,7 +87,7 @@ nicht dauerlaufen, wenn nicht gescannt wird.
 | Unit | Zweck | Status |
 |------|-------|--------|
 | `lidar-system.service` | startet `scripts/start_lidar.sh` beim Boot (roscore, rosbridge, SBG, bridge.py, Flask) | enabled |
-| `wifi-watchdog.service` | verbindet mit stärkstem bekannten WiFi, Hotspot-Fallback | disabled |
+| `wifi-watchdog.service` | verbindet mit stärkstem bekannten WiFi, Hotspot-Fallback | **enabled** (seit 14.11.2026) |
 
 `start_lidar.sh` startet **nicht** `ouster_ros` und **nicht** die SLAM-Engine — beide werden
 ausschließlich über die ARM-Sequenz im Flask-Backend gesteuert (siehe oben).

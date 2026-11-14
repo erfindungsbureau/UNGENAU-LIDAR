@@ -7,7 +7,7 @@
 │                      Jetson TX2                            │
 │                                                              │
 │  eth0 ───────────────────────────────► Ouster OS1-64        │
-│  (192.168.2.1/24)              (192.168.2.2)                │
+│  (169.254.45.100/16)           (169.254.45.204)              │
 │                                                              │
 │  USB→RS422 (/dev/ttyUSB0) ───────────► SBG Ellipse 2         │
 │                                                              │
@@ -24,8 +24,8 @@
 | | |
 |---|---|
 | **Interface** | Ethernet (`eth0`) |
-| **LiDAR IP** | `192.168.2.2` (static) |
-| **Jetson IP** | `192.168.2.1` (static, eth0) |
+| **LiDAR IP** | `169.254.45.204` (Link-Local, vom Ouster selbst gewählt; zusätzlich fest `192.168.2.2`, wird nicht benutzt) |
+| **Jetson IP** | `169.254.45.100/16` (fest, eth0, Profil `lidar-eth`) |
 | **Channels** | 64 |
 | **lidar_mode** | `1024x10` (10 Hz, 1024 Punkte/Umdrehung) |
 | **timestamp_mode** | `TIME_FROM_ROS_TIME` |

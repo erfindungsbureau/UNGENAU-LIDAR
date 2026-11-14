@@ -3,6 +3,7 @@
 
 LOG="/tmp/wifi.log"
 MODE_FILE="/tmp/wifi_mode"
+CONNECT="/home/nvidia/UNGENAU-LIDAR/scripts/wifi_connect.sh"
 FAIL_COUNT=0
 MAX_FAILS=3
 HOTSPOT_TICK=0
@@ -25,34 +26,23 @@ while true; do
             if [[ $FAIL_COUNT -ge $MAX_FAILS ]]; then
                 log "Verbindung verloren — reconnect..."
                 FAIL_COUNT=0
-                bash /home/nvidia/UNGENAU-LIDAR/scripts/wifi_connect.sh
+                bash "$CONNECT"
             fi
         fi
 
     elif [[ "$MODE" == "hotspot" ]]; then
-        # Alle 60s prüfen ob bekanntes Netz erschienen ist
+        # Alle 60 s prüfen, ob ein bekanntes Netz sichtbar ist (--list scannt selbst)
         HOTSPOT_TICK=$((HOTSPOT_TICK + 1))
         if [[ $HOTSPOT_TICK -ge 2 ]]; then
             HOTSPOT_TICK=0
-            CONFIG="/home/nvidia/config/wifi.conf"
-            nmcli dev wifi rescan ifname wlan0 2>/dev/null
-            sleep 3
-            FOUND=""
-            while IFS= read -r line; do
-                [[ "$line" =~ ^[[:space:]]*# || -z "${line// }" || "$line" =~ ^\[ ]] && continue
-                [[ "$line" != *"|"* ]] && continue
-                SSID="${line%%|*}"; SSID="${SSID// /}"
-                if nmcli -t -f SSID dev wifi list 2>/dev/null | grep -qF "$SSID"; then
-                    FOUND="$SSID"; break
-                fi
-            done < <(awk '/\[known_networks\]/,/^\[/' "$CONFIG")
+            FOUND=$(bash "$CONNECT" --list | head -1)
             if [[ -n "$FOUND" ]]; then
                 log "Bekanntes Netz '$FOUND' gefunden — wechsle zu Client"
-                bash /home/nvidia/UNGENAU-LIDAR/scripts/wifi_connect.sh
+                bash "$CONNECT"
             fi
         fi
 
     else
-        bash /home/nvidia/UNGENAU-LIDAR/scripts/wifi_connect.sh
+        bash "$CONNECT"
     fi
 done

@@ -15,7 +15,8 @@
 
 - WiFi: DHCP (StudioFiume) — IP per `ip -4 addr show wlan0` prüfen
 - Hotspot (Feld, falls kein WiFi verfügbar): `10.42.0.1`, SSID `LidarScanner`
-- Ouster eth0: Jetson `192.168.2.1/24`, LiDAR `192.168.2.2`
+- WLAN: `wifi-watchdog.service` (root, beim Start aktiv) versucht alle bekannten Netze aus `/home/nvidia/config/wifi.conf` (`SSID|PASSWORT`, nicht im Repo, Rechte 600) nach Signalstärke, sonst Hotspot; im Hotspot prüft er jede Minute, ob ein bekanntes Netz erscheint. Netze hinzufügen im Interface (Bereich «WLAN») oder per `POST /api/wifi {ssid, password}`; gleicher Name ersetzt das Passwort.
+- Ouster eth0: Jetson `169.254.45.100/16`, LiDAR `169.254.45.204` (Link-Local). Bewusst nicht 192.168.2.x: Heim- und Büronetze nutzen oft denselben Bereich und kollidieren mit dem WLAN. Der Ouster hat zusätzlich fest 192.168.2.2; Notfall-Zugriff ohne Link-Local: `sudo ip addr add 192.168.2.1/24 dev eth0`
 - Tailscale/VPN: `100.64.0.25` (für Remote-Zugriff unabhängig vom lokalen Netz)
 - Web Interface: `http://<jetson-ip>:5000`
 

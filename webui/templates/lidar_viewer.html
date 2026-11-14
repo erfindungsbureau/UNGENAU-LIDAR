@@ -225,6 +225,24 @@
     <div style="font-size:10px;color:var(--c-muted);text-align:center;margin-top:2px" id="scan-pts-count">— Punkte</div>
   </div>
 
+  <!-- WLAN -->
+  <div id="wifi-panel" class="panel">
+    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>WLAN</span>
+      <span id="wifi-mode" style="font-size:10px;color:var(--c-muted)">—</span>
+    </div>
+    <div id="wifi-list" style="font-size:11px;display:grid;gap:3px"></div>
+    <details style="margin-top:6px;font-size:11px">
+      <summary style="cursor:pointer;color:var(--c-muted)">+ Netz hinzufügen</summary>
+      <form id="wifi-form" style="display:grid;gap:5px;margin-top:6px" autocomplete="off">
+        <input id="wifi-ssid" placeholder="Netzname (SSID)" maxlength="32" aria-label="Netzname" style="font-family:var(--font);font-size:12px;padding:5px 7px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:inherit">
+        <input id="wifi-pass" type="password" placeholder="Passwort (8–63 Zeichen)" maxlength="63" aria-label="Passwort" style="font-family:var(--font);font-size:12px;padding:5px 7px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:inherit">
+        <button type="submit" style="padding:5px 2px;font-family:var(--font);font-size:11px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:var(--c-muted);cursor:pointer">Speichern</button>
+        <div id="wifi-msg" style="font-size:10px;color:var(--c-muted)"></div>
+      </form>
+    </details>
+  </div>
+
   <!-- System -->
   <div id="sys-panel" class="panel">
     <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
@@ -826,6 +844,41 @@ async function setTimeMode(mode) {
 }
 loadTimeMode();
 setInterval(loadTimeMode, 10000);
+
+// ── WLAN: bekannte Netze, neues Netz speichern ────────────────────────────────
+function showWifi(d) {
+  document.getElementById('wifi-mode').textContent =
+    d.mode === 'hotspot' ? 'Hotspot' : d.current ? 'verbunden: ' + d.current : '—';
+  const list = document.getElementById('wifi-list');
+  list.replaceChildren(...d.known.map(n => {
+    const row = document.createElement('div'), on = n.ssid === d.current;
+    row.style.cssText = 'display:flex;justify-content:space-between;gap:8px';
+    const name = document.createElement('span'), info = document.createElement('span');
+    name.textContent = (on ? '● ' : '○ ') + n.ssid;
+    name.style.color = on ? 'var(--c-green)' : n.signal ? 'inherit' : 'var(--c-muted)';
+    info.textContent = n.signal ? n.signal + ' %' : 'nicht in Reichweite';
+    info.style.color = 'var(--c-muted)';
+    row.append(name, info);
+    return row;
+  }));
+}
+async function loadWifi() {
+  try { showWifi(await fetch('/api/wifi').then(r => r.json())); } catch(e) {}
+}
+document.getElementById('wifi-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('wifi-msg'), pass = document.getElementById('wifi-pass');
+  try {
+    const d = await fetch('/api/wifi', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ssid: document.getElementById('wifi-ssid').value, password: pass.value})}).then(r => r.json());
+    if (!d.ok) { msg.textContent = d.msg; return; }
+    pass.value = ''; document.getElementById('wifi-ssid').value = '';
+    msg.textContent = 'Gespeichert. Im Hotspot wechselt der Jetson innert etwa einer Minute, sobald das Netz in Reichweite ist; sonst beim nächsten Start.';
+    showWifi(d);
+  } catch(err) { msg.textContent = 'Keine Verbindung zum Jetson'; }
+});
+loadWifi();
+setInterval(loadWifi, 15000);
 
 // ── ARM / DISARM ──────────────────────────────────────────────────────────────
 async function toggleArm() {
