@@ -20,6 +20,7 @@ import sys, math, bisect
 import numpy as np
 import rosbag
 import sensor_msgs.point_cloud2 as pc2
+import level
 
 bag_file   = sys.argv[1]
 xyz_file   = sys.argv[2]
@@ -112,6 +113,21 @@ if ODOM_TOPIC is None or not has_lidar:
         print("FEHLER: Weder Odometry noch SLAM-Topic gefunden.")
         sys.exit(1)
 print("Odometry-Quelle: %s" % ODOM_TOPIC)
+# FAST-LIO2 (/Odometry) gibt die Pose des SBG (IMU-Rahmen) aus, nicht die des LiDAR:
+# Rohpunkte brauchen hier die Extrinsik aus der FAST-LIO2-Konfiguration.
+# shortcut: nimmt die aktuelle Konfiguration; Bags vor dem 14.11.2026 19 Uhr wurden mit
+# extrinsic_R ~6.6 Grad gerechnet -> fuer diese den Export ueber /cloud_registered nehmen.
+L_LEVEL = np.eye(3)
+if ODOM_TOPIC == '/Odometry':
+    import yaml
+    cfg = yaml.safe_load(open('/home/nvidia/UNGENAU-LIDAR/ros/config/fast_lio_sbg.yaml'))['mapping']
+    EXT_R = np.array(cfg['extrinsic_R'], dtype=np.float64).reshape(3, 3)
+    EXT_T = np.array(cfg['extrinsic_T'], dtype=np.float64)
+    print("FAST-LIO2-Extrinsik: T = %s" % EXT_T)
+    _L, _tilt, _n = level.level_rotation(bag_file)
+    if _L is not None:
+        L_LEVEL = _L
+        print("Ausrichtung nach Schwerkraft: Karte um %.2f Grad gedreht (%d IMU-Werte)" % (_tilt, _n))
 # Bei der hochfrequenten IMU-Inkremental-Pose wird NICHT interpoliert (naechster
 # Nachbar genuegt bei ~400Hz / max ~2.5ms Abstand) -- das eliminiert die Fehlerquelle
 # "ungenaue Interpolation ueber grosse Zeitluecken", die bei den seltenen Keyframe-Posen
@@ -238,7 +254,7 @@ try:
             pts_imu = np.dot(EXT_R, pts.T).T + EXT_T
 
             # IMU -> Welt Frame
-            pts_world = np.dot(R_odom, pts_imu.T).T + t_odom
+            pts_world = (np.dot(R_odom, pts_imu.T).T + t_odom).dot(L_LEVEL.T)
 
             if per_frame_dir:
                 fname = os.path.join(per_frame_dir, "frame_%04d_t%.2f.xyz" % (frame, ts - t0))

@@ -8,7 +8,9 @@ sonst /ouster/points (Rohdaten, nur fuer statische Scans).
 Aufruf: python bag_to_xyz.py input.bag output.xyz [frame_step] [max_sec]
 """
 import sys
+import numpy as np
 import rosbag
+import level
 import sensor_msgs.point_cloud2 as pc2
 
 bag_file   = sys.argv[1]
@@ -33,6 +35,16 @@ if topic is None:
     print("WARNUNG: Kein SLAM-Topic im Bag -- Rohdaten werden exportiert")
     print("  (Bewegung des Scanners fuehrt zu Verzerrungen)")
 
+# FAST-LIO2 legt die Karte in die Startlage des Scanners -> nach der Schwerkraft ausrichten
+L = np.eye(3)
+if topic == '/cloud_registered':
+    L_, tilt, n = level.level_rotation(bag_file)
+    if L_ is not None:
+        L = L_
+        print("Ausrichtung nach Schwerkraft: Karte um %.2f Grad gedreht (%d IMU-Werte)" % (tilt, n))
+    else:
+        print("WARNUNG: keine /Odometry- und /imu/data-Daten -- Karte nicht ausgerichtet")
+
 print("Exportiere: %s -> %s  (step=%d, max_sec=%s)" % (
     bag_file, xyz_file, frame_step, str(max_sec)))
 
@@ -52,12 +64,13 @@ with open(xyz_file, 'w') as f_out:
             frame += 1
             if frame % frame_step != 0:
                 continue
-            for p in pc2.read_points(msg, field_names=('x','y','z'), skip_nans=True):
-                x, y, z = float(p[0]), float(p[1]), float(p[2])
-                if x*x + y*y + z*z < 0.25:
-                    continue
+            pts = np.array(list(pc2.read_points(msg, field_names=('x','y','z'), skip_nans=True)), dtype=np.float64)
+            if len(pts) == 0:
+                continue
+            pts = pts[(pts ** 2).sum(axis=1) >= 0.25].dot(L.T)
+            for x, y, z in pts:
                 f_out.write('%.4f %.4f %.4f\n' % (x, y, z))
-                count += 1
+            count += len(pts)
 
 elapsed = (ts - t0) if t0 else 0
 print("Fertig: %d Punkte, %d Frames, %.1fs" % (count, frame, elapsed))

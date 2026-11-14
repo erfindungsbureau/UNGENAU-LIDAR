@@ -1,10 +1,12 @@
 <launch>
   <!-- FAST-LIO2 offline: wie slam_fast_lio_sbg.launch, Eingang aus rosbag play; ident:=true setzt extrinsic_R = Einheit (gemessen 14.11.: SBG ~ Ouster bis 0.4 Grad) -->
   <arg name="ident" default="false"/>
+  <arg name="est" default="true"/>
   <rosparam command="load" file="/home/nvidia/UNGENAU-LIDAR/ros/config/fast_lio_sbg.yaml"/>
   <param name="common/lid_topic" value="/replay/points"/>
   <param name="common/imu_topic" value="/replay/imu"/>
   <rosparam if="$(arg ident)" param="mapping/extrinsic_R">[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]</rosparam>
+  <param name="mapping/extrinsic_est_en" type="bool" value="$(arg est)"/>
   <param name="feature_extract_enable" type="bool"   value="0"/>
   <param name="point_filter_num"        type="int"    value="3"/>
   <param name="max_iteration"           type="int"    value="3"/>
