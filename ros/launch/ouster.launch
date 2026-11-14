@@ -13,7 +13,7 @@
     <include file="$(find ouster_ros)/launch/sensor.launch">
       <arg name="sensor_hostname" value="169.254.45.204"/>
       <arg name="udp_dest" value="169.254.45.100"/>
-      <arg name="lidar_mode" value="1024x10"/>
+      <arg name="lidar_mode" value="2048x10"/>  <!-- 15.11.2026: doppelte Punktdichte im Bag -->
       <arg name="viz" value="false"/>
       <arg name="timestamp_mode" value="$(eval 'TIME_FROM_SYNC_PULSE_IN' if pps else 'TIME_FROM_ROS_TIME')"/>
     </include>

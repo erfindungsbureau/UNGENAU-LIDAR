@@ -14,8 +14,9 @@ Optimierung (siehe [docs/slam-staged-testing.md](docs/slam-staged-testing.md)).
 
 ## Technische Funktionsweise
 
-Kurzfassung: Ouster-Punktwolke + SBG-IMU → SLAM-Engine (LIO-SAM oder FAST-LIO2) →
-Live-Vorschau im Browser → `rosbag record` für die volle Aufnahme → Export zu XYZ/PCD.
+Kurzfassung: Ouster-Punktwolke (2048x10) + SBG-IMU → FAST-LIO2 live als 3D-Vorschau im
+Browser → `rosbag record` für die volle Aufnahme → nach dem Scan rechnet der Jetson die Bahn
+mit allen Punkten neu und erzeugt ein 1-cm-Modell (`*_1cm.ply`).
 
 Details zu ROS-Knoten, Topics, der ARM/DISARM-Zustandsmaschine und der Web-UI:
 **[docs/architecture.md](docs/architecture.md)**.
@@ -31,18 +32,20 @@ bash /home/nvidia/UNGENAU-LIDAR/scripts/start_lidar.sh
 
 Browser öffnen: `http://<jetson-ip>:5000`
 
-1. SLAM-Engine wählen (Standard: FAST-LIO2)
-2. **ARM** drücken — LiDAR fährt hoch, SLAM startet (~30–40s)
-3. Wenn SLAM grün: **SCAN** drücken, durch den Raum gehen
-4. **SCAN** stoppen, danach **DISARM** (oder 120s warten — Auto-DISARM)
-5. Bag-Liste unten: Export zu `.xyz` oder `.xyz` (hochauflösend), Download oder USB-Kopie
+1. **ARM** drücken — LiDAR fährt hoch, FAST-LIO2 startet (~40–50s)
+2. Wenn SLAM grün: **SCAN** drücken, durch den Raum gehen; die 3D-Karte oben zeigt, was
+   schon erfasst ist (⛶ = Vollbild)
+3. **SCAN** stoppen und **Speichern** — der Sensor geht aus, der Jetson rechnet das
+   1-cm-Modell (Fortschrittsbalken; ein 5-min-Scan braucht etwa 20–25 min)
+4. **↓ PLY laden** (CloudCompare, ArchiCAD) oder in der Bag-Liste: «1 cm» rechnet ältere
+   Scans nach, dazu Download/USB-Kopie und die bisherigen XYZ-Exporte
 
 ## Repo-Struktur
 
 ```
 UNGENAU-LIDAR/
 ├── webui/          Flask-Backend + Frontend (die Web-App, die auf :5000 läuft)
-├── ros/            Launch-Files + Configs für LIO-SAM / FAST-LIO2 (das, was tatsächlich läuft)
+├── ros/            Launch-Files + Configs für Ouster und FAST-LIO2 (das, was tatsächlich läuft)
 ├── scripts/        Start/Watchdog/Bridge/Export-Skripte, WiFi-Verwaltung
 ├── docs/           Setup, Architektur, Hardware, SLAM-Testprotokoll
 └── archive/        Abgelöste/abgebrochene Ansätze — Referenz, nicht aktiv genutzt
@@ -78,16 +81,15 @@ cd /home/nvidia/UNGENAU-LIDAR && git pull --ff-only
 sudo systemctl restart lidar-system.service
 ```
 
-## SLAM-Engines
+## SLAM
 
-- **LIO-SAM** — Referenzimplementierung, degeneriert nachweislich in symmetrischen
-  Innenräumen (z.B. langer gerader Korridor: Yaw-Drift trotz korrekter IMU-Daten).
-- **FAST-LIO2** — für Handheld-Scans mit schnellen Bewegungen ausgelegt (bis 1000°/s),
-  aktueller Standard.
-
-Beide sind über die Web-UI per Klick wählbar. Details zum systematischen Testen
-(LiDAR-only → +Ouster-IMU → +SBG, inkl. Orientierungs-Abgleich):
-**[docs/slam-staged-testing.md](docs/slam-staged-testing.md)**.
+**FAST-LIO2** läuft live nur als leichte Vorschau (jeder 8. Punkt, 30-cm-Karte), damit der
+TX2 neben Treiber und Aufnahme 10 Hz hält. Das eigentliche Modell entsteht nach dem Scan
+aus dem Bag: Bahn offline neu (`scripts/analysis/fl_replay.sh`), dann jede Rohmessung in
+1-cm-Würfel (`scripts/analysis/dense_export.py`), zusammengefasst in
+`scripts/analysis/process_scan.sh`. Details: [docs/architecture.md](docs/architecture.md).
+LIO-SAM ist seit 15.11.2026 entfernt (degenerierte in symmetrischen Innenräumen, siehe
+[docs/slam-staged-testing.md](docs/slam-staged-testing.md)).
 
 ## Weitere Doku
 

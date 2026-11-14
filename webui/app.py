@@ -8,6 +8,7 @@ from datetime import datetime
 from flask import Flask, render_template, jsonify, send_file, Response, request
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config["TEMPLATES_AUTO_RELOAD"] = True   # HTML-Aenderungen ohne Neustart von Flask
 
 DATA_DIR  = "/media/nvidia/SSD/lidar_data"
 BAGS_DIR  = os.path.join(DATA_DIR, "bags")
@@ -53,18 +54,138 @@ slam_process   = None
 slam_lock      = threading.Lock()
 slam_stop_timer = None
 slam_stop_lock  = threading.Lock()
-slam_engine    = "lio_sam"   # "lio_sam" | "fast_lio"
-
-SLAM_LAUNCHES = {
-    "lio_sam":  "/home/nvidia/UNGENAU-LIDAR/ros/launch/slam_lio_sam.launch",
-    "fast_lio": "/home/nvidia/UNGENAU-LIDAR/ros/launch/slam_fast_lio_sbg.launch",
-}
+# Live nur als Vorschau (leicht eingestellt); das Modell rechnet process_scan.sh nach dem Scan neu.
+SLAM_LAUNCH    = "/home/nvidia/UNGENAU-LIDAR/ros/launch/slam_fast_lio_sbg.launch"
 
 export_process  = None
 export_lock     = threading.Lock()
 export_timeout  = 1800  # 30 Minuten max (HD Export kann lang dauern)
 export_xyz_path = None   # aktuell geschriebene XYZ-Datei
 export_bag_size = 0      # Bag-Groesse als Schaetzbasis
+
+# ─── Berechnung nach dem Scan (scripts/analysis/process_scan.sh) ──────────────
+WORK_DIR       = os.path.join(DATA_DIR, "work")
+PROCESS_SCRIPT = "/home/nvidia/UNGENAU-LIDAR/scripts/analysis/process_scan.sh"
+PROCESS_LOG, PLAY_LOG = "/tmp/process.log", "/tmp/process_play.log"
+process_proc  = None
+process_state = {}          # bag, t0, cancelled, rc
+process_lock  = threading.Lock()
+
+
+def is_processing():
+    with process_lock:
+        return process_proc is not None and process_proc.poll() is None
+
+
+def _tail(path, n=4000):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2); f.seek(max(0, f.tell() - n))
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def process_progress(log, play):
+    """(Phase, Prozent 0..100) aus den Protokollen. Bahn = 0..55 %, Wolke = 55..98 %, fertig = 100 %."""
+    phases = re.findall(r"^PHASE (\w+)", log, re.M)
+    phase = phases[-1] if phases else "start"
+    if phase == "bahn":
+        m = re.findall(r"Duration: ([\d.]+) / ([\d.]+)", play)
+        f = float(m[-1][0]) / float(m[-1][1]) if m and float(m[-1][1]) > 0 else 0.0
+        return phase, round(55 * min(f, 1.0), 1)
+    if phase == "wolke":
+        m = re.findall(r"^FORTSCHRITT (\d+) (\d+)", log, re.M)
+        f = float(m[-1][0]) / float(m[-1][1]) if m and int(m[-1][1]) > 0 else 0.0
+        return phase, round(55 + 43 * min(f, 1.0), 1)
+    return phase, (100.0 if phase == "fertig" else 0.0)
+
+
+assert process_progress("PHASE bahn\n", "\r [RUNNING]  Bag Time: 1.0   Duration: 50.000 / 200.000  \r") == ("bahn", 13.8)
+assert process_progress("PHASE bahn\nPHASE wolke\nFORTSCHRITT 100 200\n", "") == ("wolke", 76.5)
+assert process_progress("", "") == ("start", 0.0)
+
+
+def start_processing(filename):
+    global process_proc
+    if is_processing():
+        return "Es läuft schon eine Berechnung"
+    bag = os.path.join(BAGS_DIR, filename)
+    if "/" in filename or not filename.endswith(".bag") or not os.path.exists(bag):
+        return "Bag nicht gefunden"
+    if is_recording():
+        return "Scan läuft"
+    # Sensor und Live-SLAM aus: der TX2 braucht alle Kerne und den Speicher fuer die Berechnung
+    if arm_state != "disarmed" or is_slam_process_running():
+        _cancel_arm_timer()
+        _disarm_sequence()
+    for p in (PROCESS_LOG, PLAY_LOG):
+        open(p, "w").close()
+    os.makedirs(WORK_DIR, exist_ok=True)
+    proc = subprocess.Popen(["bash", PROCESS_SCRIPT, bag], stdin=subprocess.DEVNULL,
+                            stdout=open(PROCESS_LOG, "w"), stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+    with process_lock:
+        process_proc = proc
+        process_state.clear()
+        process_state.update(bag=filename, t0=time.time(), cancelled=False)
+    return None
+
+
+@app.route("/api/process/<filename>", methods=["POST"])
+def api_process_start(filename):
+    err = start_processing(filename)
+    return jsonify({"ok": not err, "msg": err or "Berechnung gestartet"})
+
+
+@app.route("/api/process/status")
+def api_process_status():
+    with process_lock:
+        st = dict(process_state); proc = process_proc
+    if not st:
+        return jsonify({"active": False})
+    running = proc is not None and proc.poll() is None
+    log = _tail(PROCESS_LOG, 200000)
+    phase, pct = process_progress(log, _tail(PLAY_LOG))
+    ply = st["bag"][:-4] + "_1cm.ply"
+    done = not running and os.path.exists(os.path.join(BAGS_DIR, ply)) and phase == "fertig"
+    elapsed = time.time() - st["t0"]
+    eta = int(elapsed * (100 - pct) / pct) if running and pct > 3 else None
+    err = None
+    if not running and not done:
+        err = "abgebrochen" if st.get("cancelled") else "Fehler: " + (log.strip().splitlines() or ["?"])[-1][-160:]
+    return jsonify({"active": True, "running": running, "bag": st["bag"], "phase": phase, "pct": pct,
+                    "elapsed_s": int(elapsed), "eta_s": eta, "done": done, "error": err,
+                    "file": ply if done else None})
+
+
+@app.route("/api/process/cancel", methods=["POST"])
+def api_process_cancel():
+    with process_lock:
+        proc = process_proc
+        if proc is None or proc.poll() is not None:
+            return jsonify({"ok": False, "msg": "Keine Berechnung aktiv"})
+        process_state["cancelled"] = True
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGINT)     # inkl. roscore/rosbag der Neuberechnung
+        proc.wait(timeout=15)
+    except Exception:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    for p in glob.glob(os.path.join(BAGS_DIR, "*_1cm.ply.part")):
+        os.remove(p)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/process/dismiss", methods=["POST"])
+def api_process_dismiss():
+    if is_processing():
+        return jsonify({"ok": False})
+    with process_lock:
+        process_state.clear()
+    return jsonify({"ok": True})
+
 
 # ─── ARM / DISARM ─────────────────────────────────────────────────────────────
 arm_state       = "disarmed"   # disarmed | arming | armed | disarming
@@ -169,10 +290,9 @@ def _arm_sequence():
         return
     # SLAM starten
     if not is_slam_process_running():
-        launch = SLAM_LAUNCHES.get(slam_engine, SLAM_LAUNCHES["lio_sam"])
         cmd = ("source /opt/ros/melodic/setup.bash && "
                "source /home/nvidia/catkin_ws/devel/setup.bash && "
-               "roslaunch " + launch)
+               "roslaunch " + SLAM_LAUNCH)
         proc = subprocess.Popen(
             ["bash", "-c", cmd],
             stdin=subprocess.DEVNULL,
@@ -295,6 +415,7 @@ def get_bags():
         stem = base[:-4]  # ohne .bag
         xyz_path  = os.path.join(BAGS_DIR, stem + ".xyz")
         hires_path = os.path.join(BAGS_DIR, stem + "_hires.xyz")
+        ply_path   = os.path.join(BAGS_DIR, stem + "_1cm.ply")
         bags.append({
             "name":       base,
             "size_mb":    round(s.st_size / 1024.0 / 1024.0, 1),
@@ -303,6 +424,8 @@ def get_bags():
             "has_hires":  os.path.exists(hires_path),
             "xyz_mb":     round(os.stat(xyz_path).st_size  / 1024.0 / 1024.0, 1) if os.path.exists(xyz_path)   else 0,
             "hires_mb":   round(os.stat(hires_path).st_size / 1024.0 / 1024.0, 1) if os.path.exists(hires_path) else 0,
+            "has_ply":    os.path.exists(ply_path),
+            "ply_mb":     round(os.stat(ply_path).st_size / 1024.0 / 1024.0, 1) if os.path.exists(ply_path) else 0,
         })
     return bags
 
@@ -652,34 +775,39 @@ def api_status():
         "arm_state":    arm_state,
         "arm_secs_left": max(0, int(200 - (time.time() - arm_timer_start))) if arm_timer_start and arm_state == "armed" else None,
         "export_running": is_export_running(),
-        "slam_engine":  slam_engine,
+        "processing":   is_processing(),
         "diagnostic_mode": is_diagnostic_mode(),
         "disk":         get_disk_info(),
         "time":         datetime.now().strftime("%H:%M:%S"),
     })
 
 
-@app.route("/api/scan_preview")
-def api_scan_preview():
+@app.route("/api/map_3d")
+def api_map_3d():
+    """Bahn, Pose, Sitzung und Anzahl Wuerfel der 3D-Vorschau (bridge.py -> /tmp/map_3d.json)."""
     try:
-        with open("/tmp/scan_2d.json") as f:
-            data = f.read()
-        resp = Response(data, mimetype="application/json")
-        resp.headers["Cache-Control"] = "no-cache, no-store"
-        return resp
-    except Exception:
-        return jsonify({"pts": [], "t": 0})
-
-
-@app.route("/api/map_2d")
-def api_map_2d():
-    try:
-        with open("/tmp/map_2d.json") as f:
+        with open("/tmp/map_3d.json") as f:
             resp = Response(f.read(), mimetype="application/json")
-        resp.headers["Cache-Control"] = "no-cache, no-store"
-        return resp
     except Exception:
-        return jsonify({"cells": [], "path": [], "pose": None})
+        resp = jsonify({"session": 0, "n": 0, "res": 0.05, "path": [], "pose": None})
+    resp.headers["Cache-Control"] = "no-cache, no-store"
+    return resp
+
+
+@app.route("/api/map_3d/cubes")
+def api_map_3d_cubes():
+    """Neue Wuerfel ab Nummer ?since=N als Int16-Tripel (Datei waechst nur, bridge.py haengt an)."""
+    since = max(0, request.args.get("since", 0, type=int))
+    try:
+        with open("/tmp/map_3d.bin", "rb") as f:
+            f.seek(since * 6)
+            data = f.read(6 * 400000)            # hoechstens 400k Wuerfel pro Abruf
+    except Exception:
+        data = b""
+    data = data[:len(data) // 6 * 6]
+    resp = Response(data, mimetype="application/octet-stream")
+    resp.headers["Cache-Control"] = "no-cache, no-store"
+    return resp
 
 
 @app.route("/api/imu")
@@ -699,6 +827,8 @@ def api_record_start():
     global recording_process, recording_start_time
     if is_recording():
         return jsonify({"ok": False, "msg": "Läuft bereits"})
+    if is_processing():
+        return jsonify({"ok": False, "msg": "Berechnung läuft – erst abwarten oder abbrechen"})
     if not is_slam_active():
         return jsonify({"ok": False, "msg": "SLAM nicht aktiv – warten bis SLAM bereit"})
     os.makedirs(BAGS_DIR, exist_ok=True)
@@ -710,10 +840,8 @@ def api_record_start():
         cmd = (
             "source {ros} && "
             "rosbag record -O {bag} "
-            "/ouster/points /ouster/imu /imu/data "  # /imu/data = SBG, fuer SLAM-Neuberechnung am Computer
-            "/lio_sam/mapping/cloud_registered "
-            "/lio_sam/mapping/odometry "
-            "/Odometry /cloud_registered "  # FAST-LIO2-Ausgabe
+            "/ouster/points /ouster/imu /imu/data "  # /imu/data = SBG, fuer die Neuberechnung nach dem Scan
+            "/Odometry /cloud_registered "  # FAST-LIO2-Live-Vorschau
             "/tf /tf_static"
         ).format(ros=ROS_SETUP, bag=bag_path)
         proc = subprocess.Popen(
@@ -753,19 +881,16 @@ def api_record_stop():
 
 @app.route("/api/slam/start", methods=["POST"])
 def api_slam_start():
-    global slam_process, slam_engine
+    global slam_process
     if is_slam_process_running():
         return jsonify({"ok": False, "msg": "SLAM läuft bereits"})
-    data   = request.get_json(silent=True) or {}
-    engine = data.get("engine", slam_engine)
-    if engine in SLAM_LAUNCHES:
-        slam_engine = engine
-    launch = SLAM_LAUNCHES.get(slam_engine, SLAM_LAUNCHES["lio_sam"])
+    if is_processing():
+        return jsonify({"ok": False, "msg": "Berechnung läuft – erst abwarten oder abbrechen"})
     try:
         cmd = (
             "source /opt/ros/melodic/setup.bash && "
             "source /home/nvidia/catkin_ws/devel/setup.bash && "
-            "roslaunch " + launch
+            "roslaunch " + SLAM_LAUNCH
         )
         proc = subprocess.Popen(
             ["bash", "-c", cmd],
@@ -779,19 +904,6 @@ def api_slam_start():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
-
-
-@app.route("/api/slam/engine", methods=["GET", "POST"])
-def api_slam_engine():
-    global slam_engine
-    if request.method == "POST":
-        data   = request.get_json(silent=True) or {}
-        engine = data.get("engine", "")
-        if engine in SLAM_LAUNCHES:
-            slam_engine = engine
-            return jsonify({"ok": True, "engine": slam_engine})
-        return jsonify({"ok": False, "msg": "Unbekannte Engine"})
-    return jsonify({"engine": slam_engine})
 
 
 @app.route("/api/slam/stop", methods=["POST"])
@@ -846,11 +958,14 @@ def api_delete_bag(filename):
     path = os.path.join(BAGS_DIR, filename)
     if not os.path.exists(path):
         return jsonify({"ok": False, "msg": "Nicht gefunden"}), 404
+    if is_processing() and process_state.get("bag") == filename:
+        return jsonify({"ok": False, "msg": "Wird gerade berechnet – erst abbrechen"})
     os.remove(path)
-    # zugehörige XYZ-Datei auch löschen
-    xyz = path.replace(".bag", ".xyz")
-    if os.path.exists(xyz):
-        os.remove(xyz)
+    # zugehörige Dateien auch löschen (XYZ, 1-cm-Modell, Posen der Neuberechnung)
+    for extra in (path[:-4] + ".xyz", path[:-4] + "_1cm.ply",
+                  os.path.join(WORK_DIR, filename[:-4] + "_poses.bag")):
+        if os.path.exists(extra):
+            os.remove(extra)
     return jsonify({"ok": True})
 
 
@@ -868,12 +983,16 @@ def api_rename_bag(filename):
     dst = os.path.join(BAGS_DIR, new_name)
     if not os.path.exists(src):
         return jsonify({"ok": False, "msg": "Nicht gefunden"}), 404
+    if os.path.exists(dst) and dst != src:
+        return jsonify({"ok": False, "msg": "Name existiert schon"})
+    if is_processing() and process_state.get("bag") == filename:
+        return jsonify({"ok": False, "msg": "Wird gerade berechnet – erst abbrechen"})
     os.rename(src, dst)
-    # XYZ-Datei mitumbenennen falls vorhanden
-    src_xyz = src.replace(".bag", ".xyz")
-    dst_xyz = dst.replace(".bag", ".xyz")
-    if os.path.exists(src_xyz):
-        os.rename(src_xyz, dst_xyz)
+    # zugehörige Dateien mitumbenennen
+    for a, b in ((src[:-4] + ".xyz", dst[:-4] + ".xyz"), (src[:-4] + "_1cm.ply", dst[:-4] + "_1cm.ply"),
+                 (os.path.join(WORK_DIR, filename[:-4] + "_poses.bag"), os.path.join(WORK_DIR, new_name[:-4] + "_poses.bag"))):
+        if os.path.exists(a):
+            os.rename(a, b)
     return jsonify({"ok": True, "name": new_name})
 
 
@@ -1059,7 +1178,7 @@ def api_export_cancel():
 def api_download(filename):
     if "/" in filename:
         return jsonify({"error": "Ungültig"}), 400
-    allowed_ext = (".bag", ".xyz", ".e57", ".pcd", ".las")
+    allowed_ext = (".bag", ".xyz", ".e57", ".pcd", ".las", ".ply")
     if not any(filename.endswith(e) for e in allowed_ext):
         return jsonify({"error": "Nicht erlaubt"}), 403
     path = os.path.join(BAGS_DIR, filename)
@@ -1122,6 +1241,8 @@ def api_arm_scan_active():
 @app.route("/api/arm", methods=["POST"])
 def api_arm():
     global arm_state
+    if is_processing():
+        return jsonify({"ok": False, "msg": "Berechnung läuft – erst abwarten oder abbrechen"})
     with arm_lock:
         if arm_state in ("arming", "armed"):
             return jsonify({"ok": False, "msg": "Bereits " + arm_state})

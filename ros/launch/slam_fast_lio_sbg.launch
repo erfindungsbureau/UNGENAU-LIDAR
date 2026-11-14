@@ -5,10 +5,10 @@
   <rosparam command="load" file="/home/nvidia/UNGENAU-LIDAR/ros/config/fast_lio_sbg.yaml"/>
 
   <param name="feature_extract_enable" type="bool"   value="0"/>
-  <param name="point_filter_num"        type="int"    value="3"/>
+  <param name="point_filter_num"        type="int"    value="8"/>  <!-- live nur Vorschau: 2048x10, jeder 8. Punkt; Modell rechnet process_scan.sh nachher mit allen -->
   <param name="max_iteration"           type="int"    value="3"/>
-  <param name="filter_size_surf"        type="double" value="0.2"/>
-  <param name="filter_size_map"         type="double" value="0.2"/>
+  <param name="filter_size_surf"        type="double" value="0.3"/>
+  <param name="filter_size_map"         type="double" value="0.3"/>
   <param name="cube_side_length"        type="double" value="200"/>
   <param name="runtime_pos_log_enable"  type="bool"   value="0"/>
 

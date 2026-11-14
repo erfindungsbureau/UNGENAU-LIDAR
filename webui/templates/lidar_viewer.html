@@ -24,7 +24,32 @@
     html,body{width:100%;height:100%;background:var(--c-bg);color:#e0e0e0;font-family:var(--font);overflow:hidden}
 
     /* ── Layout ── */
-    #app{display:flex;flex-direction:column;height:100%;max-width:480px;margin:0 auto;padding:env(safe-area-inset-top,12px) 12px env(safe-area-inset-bottom,12px);gap:8px}
+    #app{display:flex;flex-direction:column;height:100%;max-width:480px;margin:0 auto;padding:env(safe-area-inset-top,12px) 12px calc(env(safe-area-inset-bottom,12px) + 56px);gap:8px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    #app > *{flex-shrink:0}
+
+    /* ── 3D-Live-Karte ── */
+    #map3-panel{padding:8px}
+    #map3-wrap{position:relative;height:44vh;min-height:240px;border-radius:6px;overflow:hidden;background:#03090d;touch-action:none}
+    #map3-wrap canvas{display:block;width:100%;height:100%}
+    #map3-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--c-muted);text-align:center;padding:16px;pointer-events:none}
+    #map3-tools{position:absolute;right:6px;top:6px;display:flex;gap:4px}
+    #map3-tools button{font-family:var(--font);font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--c-border);background:rgba(6,14,20,.85);color:var(--c-muted);cursor:pointer}
+    #map3-tools button.on{border-color:var(--c-blue);color:var(--c-blue)}
+    #map3-info{position:absolute;left:8px;bottom:6px;font-size:10px;color:var(--c-muted);pointer-events:none}
+    /* Vollbild: per CSS, funktioniert auch auf dem iPhone (dort gibt es kein Element-Vollbild) */
+    #map3-wrap.full{position:fixed;inset:0;z-index:45;height:auto;min-height:0;border-radius:0}
+    #map3-wrap.full #map3-tools{top:calc(env(safe-area-inset-top,0px) + 8px);right:calc(env(safe-area-inset-right,0px) + 8px)}
+    #map3-wrap.full #map3-tools button{font-size:13px;padding:8px 12px}
+    #map3-wrap.full #map3-info{bottom:calc(env(safe-area-inset-bottom,0px) + 8px);font-size:12px}
+
+    /* ── Berechnung nach dem Scan ── */
+    #proc-box .pb-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+    #proc-box .pb-name{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+    #proc-box .pb-pct{font-size:20px;font-weight:800;color:var(--c-warn)}
+    #pb-track{background:var(--c-dim);border-radius:4px;height:10px;overflow:hidden}
+    #pb-fill{height:100%;width:0%;background:var(--c-warn);transition:width .8s}
+    #pb-text{font-size:11px;color:var(--c-muted);margin:6px 0 8px}
+    #proc-box .mbtns button{min-height:40px;font-size:12px}
 
     /* ── Panels ── */
     .panel{background:var(--c-panel);border:1px solid var(--c-border);border-radius:var(--r);padding:12px 14px}
@@ -179,6 +204,33 @@
     <div class="chk-row"><div class="chk-dot" id="dot-slam"  style="background:#2a3a44"></div><span id="lbl-slam"  style="color:var(--c-muted)">SLAM</span></div>
   </div>
 
+  <!-- Berechnung des 1-cm-Modells nach dem Scan -->
+  <div id="proc-box" class="panel" hidden>
+    <div class="panel-title">Modell 1 cm wird berechnet</div>
+    <div class="pb-head"><span class="pb-name" id="pb-name">—</span><span class="pb-pct" id="pb-pct">0 %</span></div>
+    <div id="pb-track"><div id="pb-fill"></div></div>
+    <div id="pb-text">—</div>
+    <div class="mbtns">
+      <button class="bs" id="pb-cancel" onclick="cancelProcess()">Abbrechen</button>
+      <button class="bp" id="pb-dl" onclick="dlProcessed()" hidden>↓ PLY laden</button>
+      <button class="bs" id="pb-ok" onclick="dismissProcess()" hidden>OK</button>
+    </div>
+  </div>
+
+  <!-- 3D-Live-Karte (FAST-LIO2) -->
+  <div id="map3-panel" class="panel">
+    <div id="map3-wrap">
+      <div id="map3-empty">Live-Karte erscheint nach ARM</div>
+      <div id="map3-tools">
+        <button id="m3-follow" class="on" onclick="map3Follow()">Folgen</button>
+        <button onclick="map3Top()">Oben</button>
+        <button onclick="map3Fit()">Ganz</button>
+        <button id="m3-full" onclick="map3Full()" title="Vollbild" aria-label="Vollbild">⛶</button>
+      </div>
+      <div id="map3-info">—</div>
+    </div>
+  </div>
+
   <!-- IMU -->
   <div id="imu-panel" class="panel">
     <div class="panel-title">Orientierung</div>
@@ -191,10 +243,6 @@
 
   <!-- Action Buttons -->
   <div id="actions" style="display:block">
-    <div style="display:flex;gap:4px;margin-bottom:6px">
-      <button id="eng-lio" onclick="setEngine('lio_sam')" style="flex:1;padding:5px 2px;font-family:var(--font);font-size:11px;border-radius:var(--r);border:1px solid var(--c-green);background:rgba(76,175,80,.15);color:var(--c-green);cursor:pointer">LIO-SAM</button>
-      <button id="eng-flio" onclick="setEngine('fast_lio')" style="flex:1;padding:5px 2px;font-family:var(--font);font-size:11px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:var(--c-muted);cursor:pointer">FAST-LIO2</button>
-    </div>
     <div style="display:flex;gap:4px;margin-bottom:2px">
       <button id="tm-ros" onclick="setTimeMode('ros')" style="flex:1;padding:5px 2px;font-family:var(--font);font-size:11px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:var(--c-muted);cursor:pointer">Zeit: Jetson</button>
       <button id="tm-pps" onclick="setTimeMode('pps')" style="flex:1;padding:5px 2px;font-family:var(--font);font-size:11px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:var(--c-muted);cursor:pointer">Zeit: PPS</button>
@@ -218,14 +266,10 @@
   <!-- Diagnose Panel -->
   <div id="diag-panel" class="panel" style="display:none">
     <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
-      <span style="display:flex;align-items:center;gap:6px">Diagnose
-        <button id="dv-scan" onclick="setDiagView('scan')" style="padding:2px 8px;font-family:var(--font);font-size:10px;border-radius:var(--r);border:1px solid var(--c-blue);background:none;color:var(--c-blue);cursor:pointer">Scan</button>
-        <button id="dv-map" onclick="setDiagView('map')" style="padding:2px 8px;font-family:var(--font);font-size:10px;border-radius:var(--r);border:1px solid var(--c-border);background:none;color:var(--c-muted);cursor:pointer">Karte</button>
-      </span>
+      <span>Diagnose · Lage</span>
       <button onclick="toggleDiag()" style="background:none;border:none;color:var(--c-muted);font-size:12px;cursor:pointer">✕ schliessen</button>
     </div>
-    <canvas id="scan-canvas" width="320" height="360" style="width:100%;border-radius:6px;background:#050e14;display:block"></canvas>
-    <div style="font-size:10px;color:var(--c-muted);text-align:center;margin-top:2px" id="scan-pts-count">— Punkte</div>
+    <canvas id="scan-canvas" width="320" height="100" style="width:100%;border-radius:6px;background:#050e14;display:block"></canvas>
   </div>
 
   <!-- WLAN -->
@@ -314,6 +358,7 @@
   </div>
 </div>
 
+<script src="/static/three.min.js"></script>
 <script>
 // ── Status-Polling ────────────────────────────────────────────────────────────
 let scanReady = false, slamOn = false, currentArmState = 'disarmed';
@@ -380,7 +425,6 @@ setInterval(async () => {
     updateBanner(!!d.lidar, !!d.imu, !!d.slam_active, d.arm_state || 'disarmed');
     updateArmBtn(d.arm_state || 'disarmed', d.arm_secs_left);
     slamOn = !!d.slam;
-    if (d.slam_engine && d.slam_engine !== selectedEngine) setEngine(d.slam_engine, false);
   } catch(e) {}
 }, 2000);
 
@@ -670,8 +714,9 @@ async function showSaveOv() {
 async function saveRec() {
   const name = document.getElementById('s-name').value.trim();
   if (!name) { document.getElementById('s-name').focus(); return; }
-  await fetch('/api/bags/'+encodeURIComponent(curBag)+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  const r = await fetch('/api/bags/'+encodeURIComponent(curBag)+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}).then(r => r.json()).catch(() => ({}));
   closeOv('save-ov'); loadBags();
+  startProcess(r.ok ? r.name : curBag);    // gleich das 1-cm-Modell rechnen
 }
 async function discardRec() {
   if (!confirm('Aufnahme endgültig löschen?')) return;
@@ -712,12 +757,15 @@ async function loadBags() {
         ${b.has_xyz  ? `<button class="bbtn b-usb ${usbCls}" onclick="copyToUsb('${xyzName}')"  title="XYZ auf USB">⏏ XYZ</button>` : ''}
         <button class="bbtn b-hi" onclick="exportBagHires('${b.name}')">HD${hiInfo}</button>
         ${b.has_hires ? `<button class="bbtn b-usb ${usbCls}" onclick="copyToUsb('${hiName}')" title="HD-XYZ auf USB">⏏ HD</button>` : ''}
+        ${b.has_ply ? `<button class="bbtn b-hi" onclick="dlFile('${stem}_1cm.ply')" title="1-cm-Modell laden">↓ PLY ${b.ply_mb}MB</button>`
+                    : `<button class="bbtn b-hi" onclick="startProcess('${b.name}')" title="1-cm-Modell berechnen">1 cm</button>`}
         <button class="bbtn b-rm" onclick="delBag('${b.name}')">🗑</button>
       </div></div>`;
     }).join('');
   } catch(e) {}
 }
 function dlBag(n) { window.location = '/api/download/' + encodeURIComponent(n); }
+function dlFile(n) { window.location = '/api/download/' + encodeURIComponent(n); }
 async function delBag(n) {
   if (!confirm('Scan löschen?\n' + n.replace(/\.bag$/,''))) return;
   await fetch('/api/bags/'+encodeURIComponent(n),{method:'DELETE'}); loadBags();
@@ -807,21 +855,6 @@ async function cancelExport() {
 function dlExport() {
   if (expFile) window.location = '/api/download/' + encodeURIComponent(expFile);
   closeOv('exp-ov');
-}
-
-// ── SLAM Engine ───────────────────────────────────────────────────────────────
-let selectedEngine = 'lio_sam';
-function setEngine(engine, send = true) {   // send=false: nur Anzeige an den Stand des Jetson angleichen
-  selectedEngine = engine;
-  if (send) fetch('/api/slam/engine', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({engine})});
-  const lio  = document.getElementById('eng-lio');
-  const flio = document.getElementById('eng-flio');
-  lio.style.borderColor  = engine==='lio_sam'  ? 'var(--c-green)' : 'var(--c-border)';
-  lio.style.color        = engine==='lio_sam'  ? 'var(--c-green)' : 'var(--c-muted)';
-  lio.style.background   = engine==='lio_sam'  ? 'rgba(76,175,80,.15)' : 'none';
-  flio.style.borderColor = engine==='fast_lio' ? 'var(--c-blue)' : 'var(--c-border)';
-  flio.style.color       = engine==='fast_lio' ? 'var(--c-blue)' : 'var(--c-muted)';
-  flio.style.background  = engine==='fast_lio' ? 'rgba(79,195,247,.15)' : 'none';
 }
 
 // ── Zeitbasis: Jetson-Uhr oder SBG-PPS ────────────────────────────────────────
@@ -931,108 +964,15 @@ function toggleDiag() {
   }
 }
 
-// ── Canvas ────────────────────────────────────────────────────────────────────
-const SCAN_RANGE = 15;
-const SCAN_H = 260;   // Höhe Scanbereich
-const LEVEL_H = 100;  // Höhe Wasserwaagenbereich
+// ── Canvas: Wasserwaage ──────────────────────────────────────────────────────
+const SCAN_H = -4;    // Wasserwaage beginnt oben im Canvas
+const LEVEL_H = 100;
 
 function renderFrame(pts, imu) {
   const cv = document.getElementById('scan-canvas');
   const ctx = cv.getContext('2d');
-  const W = cv.width, H = cv.height;
-  ctx.clearRect(0, 0, W, H);
-  if (diagView === 'map') drawMap(ctx, W, mapData);
-  else drawTopDown(ctx, W, pts);
-  drawSpiritLevel(ctx, W, imu);
-  document.getElementById('scan-pts-count').textContent = diagView === 'map'
-    ? (mapData.cells || []).length + ' Kartenzellen à ' + Math.round((mapData.res || 0.1) * 100) + ' cm'
-    : pts.length + ' Punkte';
-}
-
-// ── Karte: Grundriss aus dem SLAM (bridge.py → /tmp/map_2d.json) ─────────────
-let diagView = 'scan', mapData = {}, mapFetched = 0;
-function setDiagView(v) {
-  diagView = v; mapFetched = 0;
-  for (const [id, m] of [['dv-scan', 'scan'], ['dv-map', 'map']]) {
-    const b = document.getElementById(id), on = v === m;
-    b.style.borderColor = on ? 'var(--c-blue)' : 'var(--c-border)';
-    b.style.color       = on ? 'var(--c-blue)' : 'var(--c-muted)';
-  }
-}
-
-function drawMap(ctx, W, m) {
-  const cells = m.cells || [], path = m.path || [], res = m.res || 0.1;
-  ctx.fillStyle = '#050e14'; ctx.fillRect(0, 0, W, SCAN_H);
-  if (!cells.length) {
-    ctx.fillStyle = '#546e7a'; ctx.font = '11px monospace'; ctx.textAlign = 'center';
-    ctx.fillText('Noch keine Karte — SLAM läuft nicht', W / 2, SCAN_H / 2);
-    ctx.textAlign = 'left';
-    return;
-  }
-  // Ausschnitt: alle Zellen und der Weg, gleiche Massstäbe in X und Y. Welt-X nach oben, Welt-Y nach links.
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const [i, j] of cells) { x0 = Math.min(x0, i * res); x1 = Math.max(x1, (i + 1) * res); y0 = Math.min(y0, j * res); y1 = Math.max(y1, (j + 1) * res); }
-  for (const [x, y] of path) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-  const pad = 10, scale = Math.min((W - 2 * pad) / (y1 - y0 || 1), (SCAN_H - 2 * pad) / (x1 - x0 || 1));
-  const ox = W / 2 + (y0 + y1) / 2 * scale, oy = SCAN_H / 2 + (x0 + x1) / 2 * scale;
-  const sx = y => ox - y * scale, sy = x => oy - x * scale;
-
-  ctx.fillStyle = '#00e5ff';
-  const s = Math.max(1, res * scale);
-  for (const [i, j] of cells) ctx.fillRect(sx((j + 1) * res), sy((i + 1) * res), s, s);
-
-  if (path.length > 1) {
-    ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 1.5; ctx.beginPath();
-    path.forEach(([x, y], k) => k ? ctx.lineTo(sx(y), sy(x)) : ctx.moveTo(sx(y), sy(x)));
-    ctx.stroke();
-  }
-  if (m.pose) {
-    const [x, y, yaw] = m.pose, px = sx(y), py = sy(x);
-    ctx.strokeStyle = '#ff5722'; ctx.lineWidth = 2; ctx.beginPath();
-    ctx.moveTo(px, py); ctx.lineTo(px - Math.sin(yaw) * 14, py - Math.cos(yaw) * 14); ctx.stroke();
-    ctx.fillStyle = '#ff5722'; ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
-  }
-  // Massstab 1 m
-  ctx.strokeStyle = '#546e7a'; ctx.lineWidth = 2; ctx.beginPath();
-  ctx.moveTo(8, SCAN_H - 8); ctx.lineTo(8 + scale, SCAN_H - 8); ctx.stroke();
-  ctx.fillStyle = '#546e7a'; ctx.font = '9px monospace'; ctx.fillText('1 m', 12 + scale, SCAN_H - 5);
-}
-
-function drawTopDown(ctx, W, pts) {
-  const cx = W/2, cy = SCAN_H/2, scale = cx / SCAN_RANGE;
-
-  // Gitterkreise
-  ctx.lineWidth = 1;
-  [5, 10, 15].forEach(r => {
-    ctx.strokeStyle = '#0d2030';
-    ctx.beginPath(); ctx.arc(cx, cy, r * scale, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle = '#1a3040'; ctx.font = '9px monospace';
-    ctx.fillText(r+'m', cx + 3, cy - r*scale + 10);
-  });
-
-  // Achsenlinien
-  ctx.strokeStyle = '#0d2030';
-  ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx, SCAN_H); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.stroke();
-
-  // Achsenlabels
-  ctx.font = 'bold 10px monospace';
-  ctx.fillStyle = '#4fc3f7'; ctx.fillText('X+ vorwärts', cx-36, 12);
-  ctx.fillStyle = '#4caf50'; ctx.fillText('Y+', 3, cy-3);
-  ctx.fillStyle = '#ef5350'; ctx.fillText('Y-', W-20, cy-3);
-
-  // Punkte
-  ctx.fillStyle = '#00e5ff';
-  pts.forEach(([x,y]) => {
-    const px = cx - y * scale;
-    const py = cy - x * scale;
-    if (px<0||px>W||py<0||py>SCAN_H) return;
-    ctx.fillRect(px-1, py-1, 2, 2);
-  });
-
-  // Sensorposition
-  ctx.fillStyle = '#ff5722';
-  ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.fill();
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  drawSpiritLevel(ctx, cv.width, imu);
 }
 
 function drawSpiritLevel(ctx, W, imu) {
@@ -1109,18 +1049,191 @@ function drawSpiritLevel(ctx, W, imu) {
 
 // ── Diagnose Polling ──────────────────────────────────────────────────────────
 async function pollDiag() {
-  try {
-    if (diagView === 'map' && Date.now() - mapFetched > 1000) {   // Karte nur 1× pro Sekunde
-      mapFetched = Date.now();
-      mapData = await fetch('/api/map_2d').then(r => r.json());
-    }
-    const [scan, imu] = await Promise.all([
-      fetch('/api/scan_preview').then(r => r.json()),
-      fetch('/api/imu').then(r => r.json()),
-    ]);
-    renderFrame(scan.pts || [], imu);
-  } catch(e) {}
+  try { renderFrame([], await fetch('/api/imu').then(r => r.json())); } catch(e) {}
 }
+
+// ── 3D-Live-Karte: Würfel à 5 cm aus FAST-LIO2 (bridge.py → /api/map_3d) ─────
+const M3 = { session: null, n: 0, res: 0.05, z0: null, chunks: [], cur: null, CAP: 150000,
+             yaw: -2.4, pitch: 0.75, dist: 14, follow: true, dirty: true, pose: null, path: [] };
+(function initMap3() {
+  const wrap = document.getElementById('map3-wrap');
+  const R = new THREE.WebGLRenderer({ antialias: false });
+  R.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  wrap.prepend(R.domElement);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0x03090d);
+  const cam = new THREE.PerspectiveCamera(55, 1, 0.05, 500); cam.up.set(0, 0, 1);
+  const target = new THREE.Vector3();
+  const mat = new THREE.PointsMaterial({ size: 0.03, vertexColors: true, sizeAttenuation: true });
+  const pathGeo = new THREE.BufferGeometry();
+  const pathLine = new THREE.Line(pathGeo, new THREE.LineBasicMaterial({ color: 0xff9800 }));
+  const me = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff5722 }));
+  const dirGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0.8, 0, 0)]);
+  const dir = new THREE.Line(dirGeo, new THREE.LineBasicMaterial({ color: 0xff5722 }));
+  me.add(dir); me.visible = false;
+  scene.add(pathLine, me);
+  Object.assign(M3, { R, scene, cam, target, mat, pathGeo, me, wrap });
+
+  function size() {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    R.setSize(w, h, false); cam.aspect = w / Math.max(h, 1); cam.updateProjectionMatrix(); M3.dirty = true;
+  }
+  new ResizeObserver(size).observe(wrap); size();
+
+  // Ziehen = drehen, zwei Finger / Mausrad = Abstand
+  const ptr = new Map(); let pinch0 = 0, dist0 = 0;
+  wrap.addEventListener('pointerdown', e => { if (e.target.closest('button')) return; wrap.setPointerCapture(e.pointerId); ptr.set(e.pointerId, [e.clientX, e.clientY]);
+    if (ptr.size === 2) { const [a, b] = [...ptr.values()]; pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); dist0 = M3.dist; } });
+  wrap.addEventListener('pointermove', e => {
+    if (!ptr.has(e.pointerId)) return;
+    const [px, py] = ptr.get(e.pointerId); ptr.set(e.pointerId, [e.clientX, e.clientY]);
+    if (ptr.size === 1) {
+      M3.yaw -= (e.clientX - px) * 0.008;
+      M3.pitch = Math.min(1.55, Math.max(0.05, M3.pitch + (e.clientY - py) * 0.006));
+    } else if (ptr.size === 2 && pinch0 > 0) {
+      const [a, b] = [...ptr.values()];
+      M3.dist = Math.min(150, Math.max(1, dist0 * pinch0 / Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1]))));
+    }
+    M3.dirty = true;
+  });
+  const up = e => { ptr.delete(e.pointerId); pinch0 = 0; };
+  wrap.addEventListener('pointerup', up); wrap.addEventListener('pointercancel', up);
+  wrap.addEventListener('wheel', e => { e.preventDefault(); M3.dist = Math.min(150, Math.max(1, M3.dist * Math.exp(e.deltaY * 0.001))); M3.dirty = true; }, { passive: false });
+
+  (function loop() {
+    requestAnimationFrame(loop);
+    if (M3.follow && M3.pose) {
+      const p = new THREE.Vector3(M3.pose[0], M3.pose[1], M3.pose[2]);
+      if (target.distanceTo(p) > 0.005) { target.lerp(p, 0.15); M3.dirty = true; }
+    }
+    if (!M3.dirty) return;
+    M3.dirty = false;
+    const c = Math.cos(M3.pitch);
+    cam.position.set(target.x + M3.dist * c * Math.cos(M3.yaw), target.y + M3.dist * c * Math.sin(M3.yaw), target.z + M3.dist * Math.sin(M3.pitch));
+    cam.lookAt(target);
+    R.render(scene, cam);
+  })();
+})();
+
+function map3Color(z, out, k) {   // Höhe über Start: blau (Boden) → grün → gelb → orange (Decke)
+  const t = Math.min(1, Math.max(0, (z - (M3.z0 ?? 0) + 1.6) / 3.0));
+  const c = new THREE.Color().setHSL(0.62 - 0.55 * t, 0.85, 0.42 + 0.18 * t);
+  out[k] = c.r; out[k + 1] = c.g; out[k + 2] = c.b;
+}
+
+function map3Chunk() {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(M3.CAP * 3), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(M3.CAP * 3), 3));
+  g.setDrawRange(0, 0); g.userData.count = 0;
+  const pts = new THREE.Points(g, M3.mat); pts.frustumCulled = false;
+  M3.scene.add(pts); M3.chunks.push(pts); M3.cur = g;
+}
+
+function map3Clear() {
+  for (const p of M3.chunks) { M3.scene.remove(p); p.geometry.dispose(); }
+  M3.chunks = []; M3.cur = null; M3.n = 0; M3.z0 = null; M3.dirty = true;
+}
+
+function map3Add(buf) {
+  const q = new Int16Array(buf), r = M3.res;
+  for (let i = 0; i < q.length; i += 3) {
+    if (!M3.cur || M3.cur.userData.count >= M3.CAP) map3Chunk();
+    const g = M3.cur, k = g.userData.count * 3, P = g.attributes.position.array;
+    P[k] = (q[i] + 0.5) * r; P[k + 1] = (q[i + 1] + 0.5) * r; P[k + 2] = (q[i + 2] + 0.5) * r;
+    map3Color(P[k + 2], g.attributes.color.array, k);
+    g.userData.count++;
+  }
+  for (const p of M3.chunks) {
+    const g = p.geometry; g.setDrawRange(0, g.userData.count);
+    g.attributes.position.needsUpdate = true; g.attributes.color.needsUpdate = true;
+  }
+  M3.n += q.length / 3; M3.dirty = true;
+}
+
+let map3Busy = false;
+async function pollMap3() {
+  if (map3Busy) return; map3Busy = true;
+  try {
+    const m = await fetch('/api/map_3d').then(r => r.json());
+    if (m.session !== M3.session) { map3Clear(); M3.session = m.session; }
+    M3.res = m.res || 0.05; M3.path = m.path || []; M3.pose = m.pose;
+    if (M3.z0 === null && M3.path.length) M3.z0 = M3.path[0][2];
+    for (let k = 0; k < 4 && M3.n < m.n; k++) {          // Rückstand in Portionen holen
+      const buf = await fetch('/api/map_3d/cubes?since=' + M3.n).then(r => r.arrayBuffer());
+      if (!buf.byteLength) break;
+      map3Add(buf);
+    }
+    M3.pathGeo.setFromPoints(M3.path.map(p => new THREE.Vector3(p[0], p[1], p[2])));
+    if (M3.pose) { M3.me.visible = true; M3.me.position.set(M3.pose[0], M3.pose[1], M3.pose[2]); M3.me.rotation.set(0, 0, M3.pose[3]); }
+    else M3.me.visible = false;
+    document.getElementById('map3-empty').hidden = M3.n > 0;
+    document.getElementById('map3-info').textContent = M3.n ? (M3.n / 1000).toFixed(0) + 'k Würfel à 5 cm · Weg ' + (M3.path.length * 0.2).toFixed(0) + ' m' : '';
+    M3.dirty = true;
+  } catch (e) {}
+  map3Busy = false;
+}
+pollMap3(); setInterval(pollMap3, 1000);
+
+function map3Follow() { M3.follow = !M3.follow; document.getElementById('m3-follow').classList.toggle('on', M3.follow); M3.dirty = true; }
+function map3Full() {
+  const w = document.getElementById('map3-wrap'), on = !w.classList.contains('full');
+  w.classList.toggle('full', on);
+  document.getElementById('m3-full').textContent = on ? '✕' : '⛶';
+  document.getElementById('m3-full').classList.toggle('on', on);
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('map3-wrap').classList.contains('full')) map3Full(); });
+function map3Top() { M3.pitch = 1.55; M3.dirty = true; }
+function map3Fit() {
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of M3.chunks) { p.geometry.computeBoundingBox(); const b = p.geometry.boundingBox;
+    if (!b || !p.geometry.userData.count) continue;
+    lo = lo.map((v, i) => Math.min(v, b.min.getComponent(i))); hi = hi.map((v, i) => Math.max(v, b.max.getComponent(i))); }
+  if (!isFinite(lo[0])) return;
+  M3.follow = false; document.getElementById('m3-follow').classList.remove('on');
+  M3.target.set((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
+  M3.dist = Math.max(4, 0.9 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1])); M3.pitch = 1.0; M3.dirty = true;
+}
+
+// ── Berechnung des 1-cm-Modells nach dem Scan ────────────────────────────────
+const PHASES = { start: 'Vorbereitung …', bahn: '1/2 Bahn neu berechnen (FAST-LIO2, alle Punkte)',
+                 wolke: '2/2 Jede Messung in 1-cm-Würfel', fertig: 'Fertig' };
+let procFile = null;
+const fmtDur = s => s >= 3600 ? Math.floor(s / 3600) + ' h ' + Math.floor(s % 3600 / 60) + ' min'
+                  : s >= 60 ? Math.floor(s / 60) + ' min ' + (s % 60) + ' s' : s + ' s';
+async function startProcess(bag) {
+  const d = await fetch('/api/process/' + encodeURIComponent(bag), { method: 'POST' }).then(r => r.json()).catch(() => ({}));
+  if (!d.ok) { showMsg('Berechnung: ' + (d.msg || 'Fehler'), 5000); return; }
+  showMsg('1-cm-Modell wird berechnet – Sensor ist dafür aus', 5000);
+  pollProcess();
+}
+async function pollProcess() {
+  try {
+    const p = await fetch('/api/process/status').then(r => r.json());
+    const box = document.getElementById('proc-box');
+    box.hidden = !p.active;
+    if (!p.active) return;
+    const col = p.error ? 'var(--c-red)' : p.done ? 'var(--c-green)' : 'var(--c-warn)';
+    document.getElementById('pb-name').textContent = p.bag.replace(/\.bag$/, '');
+    document.getElementById('pb-pct').textContent = Math.floor(p.pct) + ' %';
+    document.getElementById('pb-pct').style.color = col;
+    document.getElementById('pb-fill').style.width = p.pct + '%';
+    document.getElementById('pb-fill').style.background = col;
+    document.getElementById('pb-text').textContent = p.error ? p.error
+      : p.done ? '✓ ' + p.file + ' · Dauer ' + fmtDur(p.elapsed_s)
+      : (PHASES[p.phase] || p.phase) + ' · ' + fmtDur(p.elapsed_s) + (p.eta_s != null ? ' · noch ca. ' + fmtDur(p.eta_s) : '');
+    document.getElementById('pb-cancel').hidden = !p.running;
+    document.getElementById('pb-dl').hidden = !p.done;
+    document.getElementById('pb-ok').hidden = p.running;
+    procFile = p.file;
+  } catch (e) {}
+}
+async function cancelProcess() {
+  if (!confirm('Berechnung abbrechen? Das Bag bleibt erhalten, das Modell kann später neu gerechnet werden.')) return;
+  await fetch('/api/process/cancel', { method: 'POST' }); pollProcess();
+}
+function dlProcessed() { if (procFile) dlFile(procFile); }
+async function dismissProcess() { await fetch('/api/process/dismiss', { method: 'POST' }); pollProcess(); loadBags(); }
+pollProcess(); setInterval(pollProcess, 2000);
 </script>
 
 <!-- Hold-Still Overlay -->

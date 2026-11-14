@@ -6,7 +6,7 @@
   <rosparam command="load" file="/home/nvidia/UNGENAU-LIDAR/ros/config/fast_lio_ouster_imu.yaml"/>
 
   <param name="feature_extract_enable" type="bool"   value="0"/>
-  <param name="point_filter_num"        type="int"    value="3"/>
+  <param name="point_filter_num"        type="int"    value="6"/>  <!-- 2048x10: jeder 6. Punkt = gleiche Last wie 1024x10 mit 3 -->
   <param name="max_iteration"           type="int"    value="3"/>
   <param name="filter_size_surf"        type="double" value="0.2"/>
   <param name="filter_size_map"         type="double" value="0.2"/>

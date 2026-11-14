@@ -5,9 +5,9 @@
 ```
 ┌─────────────┐     /ouster/points      ┌──────────────┐
 │ Ouster OS1-64│ ───────────────────────►│              │
-│ (ouster_ros) │     /ouster/imu         │  SLAM-Engine │──► /Odometry, /cloud_registered
-└─────────────┘ ───────────────────────►│ (LIO-SAM ODER│    (bzw. /lio_sam/mapping/...)
-                                          │  FAST-LIO2) │
+│ (ouster_ros) │     /ouster/imu         │  FAST-LIO2   │──► /Odometry, /cloud_registered
+│  2048x10     │ ───────────────────────►│ (live, leicht│
+└─────────────┘                          │  = Vorschau) │
 ┌─────────────┐    /sbg/imu_data         │              │
 │ SBG Ellipse 2│ ──┐  /sbg/ekf_quat       └──────┬───────┘
 │ (sbg_driver) │   ├──────────────►┌──────────┐  │
@@ -19,11 +19,12 @@
                      ┌────────────────────────┴───────────────┐
                      │                                          │
               ┌──────▼──────┐                            ┌──────▼──────┐
-              │  bridge.py   │  schreibt /tmp/*.json       │  rosbag      │
-              │  (Python2)   │ ◄── liest beide SLAM-Topics │  record      │ → bags/*.bag
-              └──────┬──────┘                            └─────────────┘
-                     │ /tmp/pts.json, /tmp/imu.json,
-                     │ /tmp/bridge_status.json (lidar_ok, slam_ok, still)
+              │  bridge.py   │  schreibt /tmp/*             │  rosbag      │
+              │  (Python2)   │                              │  record      │ → bags/*.bag
+              └──────┬──────┘                            └──────┬──────┘
+                     │ /tmp/map_3d.bin + map_3d.json,            │ nach SCAN + Speichern
+                     │ /tmp/imu.json, /tmp/bridge_status.json     ▼
+                     │                                     process_scan.sh → bags/*_1cm.ply
               ┌──────▼──────┐
               │  Flask app   │  webui/app.py — ARM/DISARM, SCAN, Export, USB-Copy
               │  (Port 5000) │
@@ -32,25 +33,35 @@
 
 **Warum `bridge.py` als separate Python2-Brücke?** Die ROS-Melodic-Python-Bindings sind
 Python 2; Flask läuft unter Python 3. `bridge.py` abonniert die ROS-Topics, schreibt
-Status/Punktwolke/IMU als JSON nach `/tmp/`, und Flask liest diese Dateien — kein direkter
-ROS-Import in Flask nötig.
+Status, 3D-Vorschau und IMU nach `/tmp/`, und Flask liest diese Dateien — kein direkter
+ROS-Import in Flask nötig. Die rohen `/ouster/points` abonniert `bridge.py` bewusst nicht:
+bei 2048x10 sind das 6 MB pro Nachricht, das Entpacken in Python kostete den TX2 zu viel.
+`lidar_ok` kommt deshalb von `/ouster/imu` (gleicher Treiber).
 
-## SLAM-Engines
+## SLAM: live Vorschau, Modell nachher (seit 15.11.2026)
 
-Zwei Engines stehen zur Wahl, austauschbar über `webui/app.py:SLAM_LAUNCHES`:
+Der Ouster nimmt mit **2048x10** auf (doppelte Punktdichte). Der TX2 schafft live nicht
+gleichzeitig Treiber, Aufnahme und FAST-LIO2 mit allen Punkten (Test 15.11.: Bahn bis 85 s
+hinterher). Deshalb zwei Stufen:
 
-| Engine | Launch-File | Wann |
-|--------|-------------|------|
-| LIO-SAM | `ros/launch/slam_lio_sam.launch` | Referenz/Vergleich — degeneriert in symmetrischen Innenräumen (siehe [slam-staged-testing.md](slam-staged-testing.md)) |
-| FAST-LIO2 | `ros/launch/slam_fast_lio_sbg.launch` | Standard für Handheld-Scans mit schnellen Bewegungen |
+1. **Live** (`ros/launch/slam_fast_lio_sbg.launch`): FAST-LIO2 nur als Vorschau, jeder 8. Punkt
+   (`point_filter_num 8`), Karte 30 cm (`filter_size_surf/map 0.3`). Hält 10 Hz.
+2. **Nach dem Scan** (`scripts/analysis/process_scan.sh BAG`, vom Web-UI nach «Speichern»
+   gestartet, Sensor ist dann aus):
+   - `fl_replay.sh`: FAST-LIO2 offline auf eigenem ROS-Master (Port 11399) mit jedem 3. Punkt,
+     halbe Abspielgeschwindigkeit → `lidar_data/work/<scan>_poses.bag` (/Odometry, /replay/imu).
+     Dauer etwa 2× Scandauer.
+   - `dense_export.py`: jeder Rohpunkt (0.8–10 m), pro Spalte mit interpolierter Pose entzerrt,
+     nach Schwerkraft ausgerichtet (`level.py`), in 1-cm-Würfeln gemittelt →
+     `bags/<scan>_1cm.ply` (Farbe = Reflexion, Skalarfelder Reflexion + Infrarot).
+     Dauer etwa 2.5× Scandauer, bis ~3.5 GB RAM.
+   - Fortschritt: `PHASE …`/`FORTSCHRITT k n` in `/tmp/process.log`, rosbag-play-Zeit in
+     `/tmp/process_play.log`; `app.py:process_progress()` macht daraus den Balken
+     (Bahn 0–55 %, Wolke 55–98 %).
 
-Beide lesen IMU-Daten von `/imu/data` (SBG, via `sbg_imu_combiner.py`). Für isolierte
-Tests mit der Ouster-internen IMU siehe `ros/launch/slam_fast_lio_ouster_imu.launch`
-(Stufe 1 des Testprotokolls).
-
-`bridge.py` erkennt SLAM-Aktivität anhand **beider** möglichen Output-Topics
-(`/lio_sam/mapping/cloud_registered` und `/cloud_registered`), unabhängig davon welche
-Engine aktiv ist.
+LIO-SAM wurde am 15.11.2026 entfernt (degenerierte in symmetrischen Innenräumen, siehe
+[slam-staged-testing.md](slam-staged-testing.md)); `ros/launch/slam_fast_lio_ouster_imu.launch`
+bleibt für Tests mit der Ouster-internen IMU.
 
 ## ARM / DISARM — Zustandsmaschine
 
@@ -76,9 +87,14 @@ nicht dauerlaufen, wenn nicht gescannt wird.
 ## Web-UI Komponenten (`webui/`)
 
 - `app.py` — Flask-Backend, alle `/api/*`-Routen (Status, ARM/DISARM, SLAM-Start/Stop,
-  Recording, Export bag→XYZ, USB-Kopie).
-- `templates/lidar_viewer.html` — Single-Page-UI: Live-3D-Punktwolke (Three.js),
-  IMU-Anzeige, ARM-Button, SCAN-Button, Engine-Auswahl (LIO-SAM/FAST-LIO2), Bag-Liste/Export.
+  Recording, Export bag→XYZ, USB-Kopie, `/api/map_3d` + `/api/map_3d/cubes?since=N`
+  für die Vorschau, `/api/process/*` für das 1-cm-Modell). Während einer Berechnung sind
+  ARM und SCAN gesperrt. Templates laden ohne Flask-Neustart neu (`TEMPLATES_AUTO_RELOAD`).
+- `templates/lidar_viewer.html` — Single-Page-UI: 3D-Live-Karte (Three.js, Würfel à 5 cm,
+  nach Höhe eingefärbt, Bahn + Position; Knöpfe Folgen/Oben/Ganz/Vollbild), Fortschritt der
+  Berechnung, IMU-Anzeige, ARM-Button, SCAN-Button, Bag-Liste mit «1 cm» / «↓ PLY».
+  Die Karte holt jede Sekunde nur die neuen Würfel (Int16-Tripel; `bridge.py` hängt an
+  `/tmp/map_3d.bin` an, neue Sitzungsnummer bei neuem SLAM-Lauf).
 - `static/three.min.js`, `static/roslib.min.js` — Drittanbieter-Libraries, nicht im Git
   getrackt (`.gitignore`), müssen einmalig auf den Jetson kopiert werden (siehe README).
 
