@@ -115,6 +115,12 @@ def start_processing(filename):
         return "Bag nicht gefunden"
     if is_recording():
         return "Scan läuft"
+    # geplanten SLAM-Stopp (30 s nach Aufnahme-Ende) verwerfen: er wuerde sonst das FAST-LIO der Berechnung treffen
+    global slam_stop_timer
+    with slam_stop_lock:
+        if slam_stop_timer:
+            slam_stop_timer.cancel()
+            slam_stop_timer = None
     # Sensor und Live-SLAM aus: der TX2 braucht alle Kerne und den Speicher fuer die Berechnung
     if arm_state != "disarmed" or is_slam_process_running():
         _cancel_arm_timer()
@@ -397,6 +403,9 @@ def kill_slam_all():
         "imu_filter_node",
         "imu_relay",
     ]
+    if is_processing():
+        # Nachberechnung laeuft: deren FAST-LIO (fl_replay.sh) heisst gleich -> nur den Live-Launch beenden
+        patterns = patterns[:1]
     # SIGINT (sauber)
     for p in patterns:
         subprocess.run(["pkill", "-SIGINT", "-f", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

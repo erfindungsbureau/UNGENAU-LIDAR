@@ -184,11 +184,31 @@
     .proc-stat{color:var(--c-muted);white-space:nowrap}
     .proc-kill{background:rgba(255,60,60,.15);border:1px solid #ff3c3c;color:#ff3c3c;border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;flex-shrink:0}
     .proc-kill:active{opacity:.6}
+
+    /* ── Desktop: drei Spalten (links Bedienung, Mitte Karte, rechts Scans + System); Handy unveraendert ── */
+    .col{display:contents}
+    @media (min-width:1100px){
+      #app{max-width:none;display:grid;grid-template-columns:320px minmax(0,1fr) 380px;grid-template-rows:auto 1fr;
+           gap:12px;padding:16px;overflow:hidden}
+      .col{display:flex;flex-direction:column;gap:8px;min-height:0;overflow-y:auto}
+      .col > *{flex-shrink:0}
+      .col-a{grid-column:1;grid-row:1}
+      .col-b{grid-column:1;grid-row:2}
+      #map3-panel{grid-column:2;grid-row:1 / 3;display:flex;min-height:0}
+      #map3-wrap{height:auto;flex:1}
+      .col-c{grid-column:3;grid-row:1 / 3}
+      #drawer{position:static;transform:none;max-width:none;margin:0;border:1px solid var(--c-border);border-radius:var(--r);
+              background:var(--c-panel);transition:none}
+      #drw-handle{cursor:default;height:40px}
+      #drw-arrow{display:none}
+      #drw-body{max-height:52vh}
+    }
   </style>
 </head>
 <body>
 <div id="app">
 
+  <div class="col col-a">
   <!-- Aufnahme läuft -->
   <div id="rec-overlay">
     <div class="ro-head">● AUFNAHME LÄUFT</div>
@@ -217,6 +237,8 @@
     </div>
   </div>
 
+  </div>
+
   <!-- 3D-Live-Karte (FAST-LIO2) -->
   <div id="map3-panel" class="panel">
     <div id="map3-wrap">
@@ -231,6 +253,7 @@
     </div>
   </div>
 
+  <div class="col col-b">
   <!-- IMU -->
   <div id="imu-panel" class="panel">
     <div class="panel-title">Orientierung</div>
@@ -263,6 +286,9 @@
     </button>
   </div>
 
+  </div>
+
+  <div class="col col-c" id="col-c">
   <!-- Diagnose Panel -->
   <div id="diag-panel" class="panel" style="display:none">
     <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">
@@ -307,6 +333,7 @@
     </div>
   </div>
 
+  </div>
 </div>
 
 <!-- Scan-Liste Drawer -->
@@ -727,6 +754,7 @@ async function discardRec() {
 // ── Scan-Liste ────────────────────────────────────────────────────────────────
 let dwOpen = false;
 function toggleDrawer() {
+  if (deskMQ.matches) return;
   dwOpen = !dwOpen;
   document.getElementById('drawer').classList.toggle('open', dwOpen);
   document.getElementById('drw-arrow').textContent = dwOpen ? '▼' : '▲';
@@ -1234,6 +1262,20 @@ async function cancelProcess() {
 function dlProcessed() { if (procFile) dlFile(procFile); }
 async function dismissProcess() { await fetch('/api/process/dismiss', { method: 'POST' }); pollProcess(); loadBags(); }
 pollProcess(); setInterval(pollProcess, 2000);
+
+// Desktop: Scan-Liste fest in die rechte Spalte, immer offen; auf dem Handy wieder unten als Schublade
+const deskMQ = matchMedia('(min-width:1100px)');
+function applyDesk() {
+  const dw = document.getElementById('drawer');
+  if (deskMQ.matches) {
+    document.getElementById('col-c').prepend(dw);
+    dwOpen = true; loadBags();
+  } else if (dw.parentElement !== document.body) {
+    document.body.insertBefore(dw, document.getElementById('app').nextSibling);
+    dwOpen = false; dw.classList.remove('open'); document.getElementById('drw-arrow').textContent = '▲';
+  }
+}
+deskMQ.addEventListener('change', applyDesk); applyDesk();
 </script>
 
 <!-- Hold-Still Overlay -->

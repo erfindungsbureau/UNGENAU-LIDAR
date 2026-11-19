@@ -4,7 +4,8 @@
 point_filter_num-te wie in /cloud_registered), pro Spalte mit der zeitlich interpolierten FAST-LIO2-Pose
 entzerrt, nach Schwerkraft ausgerichtet (level.py), in Wuerfeln gemittelt mit Reflexion und Infrarot.
 
-Aufruf: python2 dense_export.py BAG OUT_PREFIX [VOXEL=0.01] [MIN_R=0.8] [MAX_R=10] [MASK_DIR|-] [POSE_BAG]
+Aufruf: python2 dense_export.py BAG OUT_PREFIX [VOXEL=0.01] [MIN_R=0.8] [MAX_R=10] [MASK_DIR|-] [POSE_BAG|-] [HBA_DIR]
+  HBA_DIR: Ordner von hba_prepare.py nach dem HBA-Lauf -> ausgeglichene Bahn statt FAST-LIO2
   POSE_BAG: Bag einer Neuberechnung (fl_replay.sh) mit /Odometry und /replay/imu statt der Live-Posen
   MASK_DIR: Ordner mit region.npy + shot_transform.json (von Hand gezeichneter Grundriss, match_shot.py)
 Ausgabe: OUT_PREFIX_xyz.f32 (n*3), _refl.f32, _amb.f32, _cnt.u16, _path.f32 (Bahn), Zeilen-Info auf stdout;
@@ -22,7 +23,7 @@ VOX = float(sys.argv[3]) if len(sys.argv) > 3 else 0.01
 MIN_R = float(sys.argv[4]) if len(sys.argv) > 4 else 0.8   # Ouster Gen1 Datenblatt: ab 0.8 m zuverlaessig
 MAX_R = float(sys.argv[5]) if len(sys.argv) > 5 else 10.0
 MASK = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] != "-" else None
-POSE_BAG = sys.argv[7] if len(sys.argv) > 7 else None
+POSE_BAG = sys.argv[7] if len(sys.argv) > 7 and sys.argv[7] != "-" else None
 
 cfg = yaml.safe_load(open('/home/nvidia/UNGENAU-LIDAR/ros/config/fast_lio_sbg.yaml'))['mapping']
 EXT_R = np.array(cfg['extrinsic_R'], float).reshape(3, 3); EXT_T = np.array(cfg['extrinsic_T'], float)
@@ -36,6 +37,25 @@ with rosbag.Bag(POSE_BAG or bag_file) as b:
         p, q = m.pose.pose.position, m.pose.pose.orientation
         ot.append(m.header.stamp.to_sec()); op.append([p.x, p.y, p.z]); oq.append([q.w, q.x, q.y, q.z])
 ot, op, oq = np.array(ot), np.array(op), np.array(oq)
+HBA_DIR = sys.argv[8] if len(sys.argv) > 8 else None
+if HBA_DIR:
+    # Bahn nach Buendelausgleich (HBA): pose.json ist relativ zur ersten Pose, pose_orig.json absolut
+    def _read(f):
+        return np.array([[float(v) for v in l.split()] for l in open(os.path.join(HBA_DIR, f)) if l.strip()])
+    new, orig = _read('pose.json'), _read('pose_orig.json')
+    assert len(new) == len(orig), 'HBA: Anzahl Posen passt nicht (%d/%d)' % (len(new), len(orig))
+    ot = np.array([float(l.split()[1]) for l in open(os.path.join(HBA_DIR, 'frames.txt')) if l.strip()])
+    def _rot(q):
+        w, x, y, z = q
+        return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                         [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                         [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+    R0, t0_ = _rot(orig[0, 3:]), orig[0, :3]
+    op = new[:, :3].dot(R0.T) + t0_                   # zurueck in den Anfangsrahmen von FAST-LIO
+    oq = np.array([[w0 * w - x0 * x - y0 * y - z0 * z, w0 * x + x0 * w + y0 * z - z0 * y,
+                    w0 * y - x0 * z + y0 * w + z0 * x, w0 * z + x0 * y - y0 * x + z0 * w]
+                   for (w0, x0, y0, z0), (w, x, y, z) in [(orig[0, 3:], q) for q in new[:, 3:]]])
+    print('Bahn aus HBA: %d Posen, groesste Korrektur %.3f m' % (len(op), np.abs(op - orig[:, :3]).max()))
 for i in range(1, len(oq)):                       # gleiches Vorzeichen fuer nlerp
     if np.dot(oq[i], oq[i - 1]) < 0: oq[i] *= -1
 

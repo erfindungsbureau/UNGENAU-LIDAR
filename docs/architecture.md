@@ -59,6 +59,17 @@ hinterher). Deshalb zwei Stufen:
      `/tmp/process_play.log`; `app.py:process_progress()` macht daraus den Balken
      (Bahn 0–55 %, Wolke 55–98 %).
 
+### Bündelausgleich (HBA) – getestet 18.11.2026, nicht im Ablauf
+
+`scripts/analysis/hba_prepare.py` zerlegt einen Scan in die Eingabe von
+[hku-mars/HBA](https://github.com/hku-mars/HBA) (Einzelscans lokal + `pose.json`),
+`dense_export.py … HBA_DIR` exportiert mit der ausgeglichenen Bahn. HBA ist auf dem Jetson in
+`~/catkin_ws/src/HBA` gebaut, mit zwei lokalen Änderungen: `write_pose` (mypcl.hpp) überschrieb das
+Quaternion komponentenweise (falsche Drehungen), und `voxel_size` 1.0 statt 4.0 für Innenräume.
+Ergebnis am Abendscan: Bahn bis 12 cm korrigiert, aber Wände/Böden nicht dünner
+(`flaechen_dicke.py`: Wände 31.7 → 30.7 mm, Boden 16.6 → 17.2 mm, 1 Sigma). Die ~3 cm sind
+Messrauschen des Ouster Gen1, nicht Drift – deshalb nicht in `process_scan.sh`.
+
 LIO-SAM wurde am 15.11.2026 entfernt (degenerierte in symmetrischen Innenräumen, siehe
 [slam-staged-testing.md](slam-staged-testing.md)); `ros/launch/slam_fast_lio_ouster_imu.launch`
 bleibt für Tests mit der Ouster-internen IMU.
@@ -90,7 +101,7 @@ nicht dauerlaufen, wenn nicht gescannt wird.
   Recording, Export bag→XYZ, USB-Kopie, `/api/map_3d` + `/api/map_3d/cubes?since=N`
   für die Vorschau, `/api/process/*` für das 1-cm-Modell). Während einer Berechnung sind
   ARM und SCAN gesperrt. Templates laden ohne Flask-Neustart neu (`TEMPLATES_AUTO_RELOAD`).
-- `templates/lidar_viewer.html` — Single-Page-UI: 3D-Live-Karte (Three.js, Würfel à 5 cm,
+- `templates/lidar_viewer.html` — Single-Page-UI (Handy: eine Spalte, Scan-Liste als Schublade; ab 1100 px Breite drei Spalten mit fester Scan-Liste rechts): 3D-Live-Karte (Three.js, Würfel à 5 cm,
   nach Höhe eingefärbt, Bahn + Position; Knöpfe Folgen/Oben/Ganz/Vollbild), Fortschritt der
   Berechnung, IMU-Anzeige, ARM-Button, SCAN-Button, Bag-Liste mit «1 cm» / «↓ PLY».
   Die Karte holt jede Sekunde nur die neuen Würfel (Int16-Tripel; `bridge.py` hängt an
