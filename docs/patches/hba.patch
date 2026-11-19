@@ -1,0 +1,45 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9e4ccf3..0dc254d 100755
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -46,8 +46,8 @@ catkin_package(
+ add_executable(hba source/hba.cpp)
+ target_link_libraries(hba ${catkin_LIBRARIES} ${PCL_LIBRARIES} gtsam)
+ 
+-add_executable(visualize_map source/visualize.cpp)
+-target_link_libraries(visualize_map ${catkin_LIBRARIES} ${PCL_LIBRARIES})
++#add_executable(visualize_map source/visualize.cpp)
++#target_link_libraries(visualize_map ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+ 
+ add_executable(calculate_MME source/calculate_MME.cpp)
+ target_link_libraries(calculate_MME ${catkin_LIBRARIES} ${PCL_LIBRARIES} gtsam)
+\ No newline at end of file
+diff --git a/include/hba.hpp b/include/hba.hpp
+index d60bee8..5258c5e 100644
+--- a/include/hba.hpp
++++ b/include/hba.hpp
+@@ -41,7 +41,7 @@ public:
+     layer_num = 1;
+     max_iter = 10;
+     downsample_size = 0.1;
+-    voxel_size = 4.0;
++    voxel_size = 1.0;  // Innenraum (Original 4.0 fuer Strassen)
+     eigen_ratio = 0.1;
+     reject_ratio = 0.05;
+     pose_vec.clear(); mthreads.clear(); pcds.clear();
+diff --git a/include/mypcl.hpp b/include/mypcl.hpp
+index 4a85da2..8cb5863 100755
+--- a/include/mypcl.hpp
++++ b/include/mypcl.hpp
+@@ -149,10 +149,7 @@ namespace mypcl
+     for(size_t i = 0; i < pose_vec.size(); i++)
+     {
+       pose_vec[i].t << q0.inverse()*(pose_vec[i].t-t0);
+-      pose_vec[i].q.w() = (q0.inverse()*pose_vec[i].q).w();
+-      pose_vec[i].q.x() = (q0.inverse()*pose_vec[i].q).x();
+-      pose_vec[i].q.y() = (q0.inverse()*pose_vec[i].q).y();
+-      pose_vec[i].q.z() = (q0.inverse()*pose_vec[i].q).z();
++      pose_vec[i].q = q0.inverse()*pose_vec[i].q;  // Fix: vorher komponentenweise ueberschrieben -> falsche Drehung
+       file << pose_vec[i].t(0) << " "
+            << pose_vec[i].t(1) << " "
+            << pose_vec[i].t(2) << " "

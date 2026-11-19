@@ -32,6 +32,14 @@
     #map3-wrap{position:relative;height:44vh;min-height:240px;border-radius:6px;overflow:hidden;background:#03090d;touch-action:none}
     #map3-wrap canvas{display:block;width:100%;height:100%}
     #map3-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--c-muted);text-align:center;padding:16px;pointer-events:none}
+    #map3-empty[hidden],#map3-tools button[hidden]{display:none}
+    /* Scan-Qualitaet: Ampel oben links in der Karte */
+    #m3-qual{position:absolute;left:8px;top:6px;max-width:60%;font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--c-border);background:rgba(6,14,20,.85);pointer-events:none}
+    #m3-qual[hidden]{display:none}
+    #m3-qual.s0{border-color:var(--c-green);color:var(--c-green)}
+    #m3-qual.s1{border-color:var(--c-warn);color:var(--c-warn)}
+    #m3-qual.s2{border-color:var(--c-red);color:#fff;background:rgba(244,67,54,.85);animation:blink .6s infinite}
+    #m3-qual small{display:block;opacity:.75;font-size:10px;margin-top:2px}
     #map3-tools{position:absolute;right:6px;top:6px;display:flex;gap:4px}
     #map3-tools button{font-family:var(--font);font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--c-border);background:rgba(6,14,20,.85);color:var(--c-muted);cursor:pointer}
     #map3-tools button.on{border-color:var(--c-blue);color:var(--c-blue)}
@@ -119,6 +127,8 @@
     #drw-empty{color:var(--c-muted);font-size:12px;padding:16px 0;text-align:center}
     .bag-row{padding:10px 0;border-bottom:1px solid var(--c-dim)}
     .bag-name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px}
+    .bag-view{cursor:pointer;color:var(--c-blue)}
+    .bag-view:hover{text-decoration:underline}
     .bag-meta{font-size:11px;color:var(--c-muted);margin-bottom:6px}
     .bag-actions{display:flex;gap:6px}
     .bbtn{flex:1;min-height:40px;border-radius:6px;border:1px solid var(--c-border);background:rgba(79,195,247,.06);color:var(--c-blue);font-size:12px;font-family:var(--font);cursor:pointer}
@@ -247,9 +257,12 @@
         <button id="m3-follow" class="on" onclick="map3Follow()">Folgen</button>
         <button onclick="map3Top()">Oben</button>
         <button onclick="map3Fit()">Ganz</button>
+        <button id="m3-live" onclick="showLive()" hidden title="Zurück zur Live-Karte">✕ Live</button>
+        <button id="m3-ton" onclick="toggleTon()" title="Warnton ein/aus">🔔</button>
         <button id="m3-full" onclick="map3Full()" title="Vollbild" aria-label="Vollbild">⛶</button>
       </div>
       <div id="map3-info">—</div>
+      <div id="m3-qual" hidden></div>
     </div>
   </div>
 
@@ -775,7 +788,7 @@ async function loadBags() {
       const xyzInfo  = b.has_xyz  ? ` <span style="color:var(--c-muted);font-size:10px">${b.xyz_mb}MB</span>` : '';
       const hiInfo   = b.has_hires ? ` <span style="color:var(--c-muted);font-size:10px">${b.hires_mb}MB</span>` : '';
       return `<div class="bag-row">
-      <div class="bag-name">${stem}</div>
+      <div class="bag-name${b.has_ply ? ' bag-view' : ''}"${b.has_ply ? ` onclick="showScan('${b.name}')" title="In der 3D-Ansicht zeigen"` : ''}>${b.has_ply ? '◉ ' : ''}${stem}</div>
       <div class="bag-meta">${b.size_mb} MB · ${b.mtime}</div>
       <div class="bag-actions">
         <button class="bbtn" onclick="dlBag('${b.name}')">↓ BAG</button>
@@ -785,7 +798,8 @@ async function loadBags() {
         ${b.has_xyz  ? `<button class="bbtn b-usb ${usbCls}" onclick="copyToUsb('${xyzName}')"  title="XYZ auf USB">⏏ XYZ</button>` : ''}
         <button class="bbtn b-hi" onclick="exportBagHires('${b.name}')">HD${hiInfo}</button>
         ${b.has_hires ? `<button class="bbtn b-usb ${usbCls}" onclick="copyToUsb('${hiName}')" title="HD-XYZ auf USB">⏏ HD</button>` : ''}
-        ${b.has_ply ? `<button class="bbtn b-hi" onclick="dlFile('${stem}_1cm.ply')" title="1-cm-Modell laden">↓ PLY ${b.ply_mb}MB</button>`
+        ${b.has_ply ? `<button class="bbtn b-hi" onclick="dlFile('${stem}_1cm.ply')" title="1-cm-Modell laden (roh)">↓ PLY ${b.ply_mb}MB</button>`
+                    + (b.has_glatt ? `<button class="bbtn b-hi" onclick="dlFile('${stem}_1cm_glatt.ply')" title="1-cm-Modell, ebene Flächen geglättet">↓ glatt</button>` : '')
                     : `<button class="bbtn b-hi" onclick="startProcess('${b.name}')" title="1-cm-Modell berechnen">1 cm</button>`}
         <button class="bbtn b-rm" onclick="delBag('${b.name}')">🗑</button>
       </div></div>`;
@@ -1093,11 +1107,26 @@ const M3 = { session: null, n: 0, res: 0.05, z0: null, chunks: [], cur: null, CA
   const target = new THREE.Vector3();
   const mat = new THREE.PointsMaterial({ size: 0.03, vertexColors: true, sizeAttenuation: true });
   const pathGeo = new THREE.BufferGeometry();
-  const pathLine = new THREE.Line(pathGeo, new THREE.LineBasicMaterial({ color: 0xff9800 }));
-  const me = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff5722 }));
-  const dirGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0.8, 0, 0)]);
-  const dir = new THREE.Line(dirGeo, new THREE.LineBasicMaterial({ color: 0xff5722 }));
-  me.add(dir); me.visible = false;
+  // gelaufener Pfad: immer obenauf (nicht von Wuerfeln verdeckt); das letzte Stueck bis zum Scanner live
+  const pathMat = new THREE.LineBasicMaterial({ color: 0xffb300, depthTest: false, transparent: true, opacity: 0.95 });
+  // frustumCulled aus: der Umriss wurde einmal fuer die leere Linie berechnet -> Pfad sonst unsichtbar
+  const pathLine = new THREE.Line(pathGeo, pathMat); pathLine.renderOrder = 2; pathLine.frustumCulled = false;
+  const tailGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const tail = new THREE.Line(tailGeo, pathMat); tail.renderOrder = 2; tail.visible = false; tail.frustumCulled = false;
+  scene.add(tail); M3.tail = tail;
+  // Scanner-Symbol: Ouster als Zylinder, Pfeil = Blickrichtung (+x), Ringe = Rand des Sichtbereichs (+-16.6 Grad)
+  const me = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.09, 20), new THREE.MeshBasicMaterial({ color: 0xff5722 }));
+  body.rotation.x = Math.PI / 2;                                   // Zylinderachse = Hochachse des Scanners
+  me.add(body, new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.7, 0xff5722, 0.18, 0.1));
+  const ringMat = new THREE.LineBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.7 });
+  for (const s of [-1, 1]) {
+    const r = 0.9, pts = [];
+    for (let k = 0; k <= 48; k++) { const a = k / 48 * 2 * Math.PI; pts.push(new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), s * r * Math.tan(16.6 * Math.PI / 180))); }
+    me.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ringMat));
+  }
+  me.visible = false;
+  M3.meQ = new THREE.Quaternion(); M3.meP = new THREE.Vector3();
   scene.add(pathLine, me);
   Object.assign(M3, { R, scene, cam, target, mat, pathGeo, me, wrap });
 
@@ -1129,9 +1158,17 @@ const M3 = { session: null, n: 0, res: 0.05, z0: null, chunks: [], cur: null, CA
 
   (function loop() {
     requestAnimationFrame(loop);
+    if (me.visible && (me.position.distanceTo(M3.meP) > 0.001 || 1 - Math.abs(me.quaternion.dot(M3.meQ)) > 1e-7)) {
+      me.position.lerp(M3.meP, 0.25); me.quaternion.slerp(M3.meQ, 0.25); M3.dirty = true;
+    }
+    const last = M3.path.length ? M3.path[M3.path.length - 1] : null;
+    tail.visible = me.visible && !!last;
+    if (tail.visible) {
+      const a = tail.geometry.attributes.position;
+      a.setXYZ(0, last[0], last[1], last[2]); a.setXYZ(1, me.position.x, me.position.y, me.position.z); a.needsUpdate = true;
+    }
     if (M3.follow && M3.pose) {
-      const p = new THREE.Vector3(M3.pose[0], M3.pose[1], M3.pose[2]);
-      if (target.distanceTo(p) > 0.005) { target.lerp(p, 0.15); M3.dirty = true; }
+      if (target.distanceTo(me.position) > 0.005) { target.lerp(me.position, 0.15); M3.dirty = true; }
     }
     if (!M3.dirty) return;
     M3.dirty = false;
@@ -1180,7 +1217,7 @@ function map3Add(buf) {
 
 let map3Busy = false;
 async function pollMap3() {
-  if (map3Busy) return; map3Busy = true;
+  if (map3Busy || M3.view) return; map3Busy = true;
   try {
     const m = await fetch('/api/map_3d').then(r => r.json());
     if (m.session !== M3.session) { map3Clear(); M3.session = m.session; }
@@ -1192,8 +1229,6 @@ async function pollMap3() {
       map3Add(buf);
     }
     M3.pathGeo.setFromPoints(M3.path.map(p => new THREE.Vector3(p[0], p[1], p[2])));
-    if (M3.pose) { M3.me.visible = true; M3.me.position.set(M3.pose[0], M3.pose[1], M3.pose[2]); M3.me.rotation.set(0, 0, M3.pose[3]); }
-    else M3.me.visible = false;
     document.getElementById('map3-empty').hidden = M3.n > 0;
     document.getElementById('map3-info').textContent = M3.n ? (M3.n / 1000).toFixed(0) + 'k Würfel à 5 cm · Weg ' + (M3.path.length * 0.2).toFixed(0) + ' m' : '';
     M3.dirty = true;
@@ -1201,6 +1236,88 @@ async function pollMap3() {
   map3Busy = false;
 }
 pollMap3(); setInterval(pollMap3, 1000);
+
+// Lage des Scanners live (5 Hz); die Karte selbst kommt weiter jede Sekunde
+let poseBusy = false;
+async function pollPose() {
+  if (poseBusy || document.hidden || M3.view) return; poseBusy = true;
+  try {
+    const d = await fetch('/api/pose').then(r => r.json());
+    const p = d.pose;
+    if (p && p.length === 7 && d.session === M3.session) {
+      M3.pose = p;
+      M3.meP.set(p[0], p[1], p[2]);
+      M3.meQ.set(p[4], p[5], p[6], p[3]);                          // three.js: (x, y, z, w)
+      if (!M3.me.visible) { M3.me.position.copy(M3.meP); M3.me.quaternion.copy(M3.meQ); M3.me.visible = true; }
+    } else if (!p) M3.me.visible = false;
+    showQual(d.q);
+    M3.dirty = true;
+  } catch (e) {} finally { poseBusy = false; }
+}
+setInterval(pollPose, 200);
+
+// ── Scan-Qualitaet: Ampel + Warnton (bridge.py -> /api/pose "q") ──
+// Ton erst nach einer Beruehrung der Seite moeglich (iPhone); jeder Tipp, z.B. auf ARM, schaltet ihn frei.
+let audioCtx = null, lastBeep = 0;
+let tonAn = true;
+try { tonAn = localStorage.getItem('warnton') !== 'aus'; } catch (e) {}
+document.getElementById('m3-ton').textContent = tonAn ? '🔔' : '🔕';
+document.addEventListener('pointerdown', () => {
+  try { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {}
+}, { capture: true });
+function toggleTon() {
+  tonAn = !tonAn; document.getElementById('m3-ton').textContent = tonAn ? '🔔' : '🔕';
+  try { localStorage.setItem('warnton', tonAn ? 'an' : 'aus'); } catch (e) {}
+}
+function beep(freq, dauer) {
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = audioCtx.currentTime;
+  o.frequency.value = freq; o.type = 'square';
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dauer);
+  o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t + dauer + 0.02);
+}
+function showQual(q) {
+  const el = document.getElementById('m3-qual');
+  if (!q || M3.view) { el.hidden = true; return; }
+  el.hidden = false; el.className = 's' + q.stufe;
+  el.innerHTML = (q.stufe ? '⚠ ' : '● ') + q.text +
+    `<small>${q.treffer} Treffer · Rest ${q.rest_mm} mm · ${q.dreh}°/s${q.verzug >= 1 ? ' · ' + q.verzug + ' s hinterher' : ''}</small>`;
+  const jetzt = performance.now();
+  if (tonAn && q.stufe === 2 && jetzt - lastBeep > 600) { beep(1400, 0.12); lastBeep = jetzt; }
+  else if (tonAn && q.stufe === 1 && jetzt - lastBeep > 2000) { beep(880, 0.1); lastBeep = jetzt; }
+}
+
+// Gespeicherten Scan in der 3D-Ansicht zeigen (4-cm-Vorschau des 1-cm-Modells)
+async function showScan(bag) {
+  const stem = bag.replace(/\.bag$/, ''), info = document.getElementById('map3-info'), empty = document.getElementById('map3-empty');
+  M3.view = bag; map3Clear(); M3.path = []; M3.pathGeo.setFromPoints([]); M3.me.visible = false;
+  document.getElementById('m3-live').hidden = false;
+  empty.hidden = false; empty.textContent = stem + ': Vorschau wird geladen …'; info.textContent = '';
+  if (!deskMQ.matches && dwOpen) toggleDrawer();                  // Handy: Liste zu, Karte frei
+  let m;
+  for (let t = 0; t < 300; t++) {                                  // erstes Mal: Jetson erstellt sie (~1 min)
+    m = await fetch('/api/vorschau/' + encodeURIComponent(bag)).then(r => r.json()).catch(() => ({ ok: false, msg: 'keine Verbindung' }));
+    if (M3.view !== bag) return;                                   // inzwischen anderer Scan / Live
+    if (!m.ok || m.status === 'fertig') break;
+    empty.textContent = stem + ': Vorschau wird erstellt … ' + t + ' s';
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  if (!m.ok || m.status !== 'fertig') { empty.textContent = stem + ': ' + (m.msg || 'Vorschau nicht verfügbar'); return; }
+  const buf = await fetch('/api/vorschau/' + encodeURIComponent(bag) + '/bin').then(r => r.arrayBuffer());
+  if (M3.view !== bag) return;
+  M3.res = m.res; M3.z0 = m.z0 + 1.6;                              // Farben: Boden blau wie in der Live-Karte
+  map3Add(buf);
+  empty.hidden = true;
+  info.textContent = stem + ' · ' + (m.n / 1e6).toFixed(1) + ' Mio. Würfel à ' + Math.round(m.res * 100) + ' cm';
+  map3Fit();
+}
+function showLive() {
+  M3.view = null; M3.session = null; map3Clear(); M3.res = 0.05;
+  document.getElementById('m3-live').hidden = true;
+  const empty = document.getElementById('map3-empty'); empty.textContent = 'Live-Karte erscheint nach ARM';
+  document.getElementById('map3-info').textContent = '';
+  pollMap3();
+}
 
 function map3Follow() { M3.follow = !M3.follow; document.getElementById('m3-follow').classList.toggle('on', M3.follow); M3.dirty = true; }
 function map3Full() {
@@ -1223,8 +1340,8 @@ function map3Fit() {
 }
 
 // ── Berechnung des 1-cm-Modells nach dem Scan ────────────────────────────────
-const PHASES = { start: 'Vorbereitung …', bahn: '1/2 Bahn neu berechnen (FAST-LIO2, alle Punkte)',
-                 wolke: '2/2 Jede Messung in 1-cm-Würfel', fertig: 'Fertig' };
+const PHASES = { start: 'Vorbereitung …', bahn: '1/3 Bahn neu berechnen (FAST-LIO2, alle Punkte)',
+                 wolke: '2/3 Jede Messung in 1-cm-Würfel', glatt: '3/3 Ebene Flächen glätten', fertig: 'Fertig' };
 let procFile = null;
 const fmtDur = s => s >= 3600 ? Math.floor(s / 3600) + ' h ' + Math.floor(s % 3600 / 60) + ' min'
                   : s >= 60 ? Math.floor(s / 60) + ' min ' + (s % 60) + ' s' : s + ' s';

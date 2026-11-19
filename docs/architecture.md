@@ -118,3 +118,11 @@ nicht dauerlaufen, wenn nicht gescannt wird.
 
 `start_lidar.sh` startet **nicht** `ouster_ros` und **nicht** die SLAM-Engine — beide werden
 ausschließlich über die ARM-Sequenz im Flask-Backend gesteuert (siehe oben).
+
+## Patches an Fremd-Paketen (~/catkin_ws/src)
+
+- `docs/patches/fast_lio_quality.patch` – FAST-LIO veröffentlicht pro Scan `/fastlio/quality`
+  (Float64MultiArray: Scan-Ende, Punkte, ausgedünnt, Treffer, Restfehler, degen). `bridge.py` macht daraus
+  die Ampel mit Warnton im Web-UI. Anwenden: `cd ~/catkin_ws/src/FAST_LIO && patch -p1 < …`, dann
+  `catkin_make --pkg fast_lio`.
+- `docs/patches/hba.patch` – HBA: Quaternion-Fix in `write_pose`, `voxel_size` 1.0, Visualisierung aus.

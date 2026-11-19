@@ -87,22 +87,26 @@ def _tail(path, n=4000):
 
 
 def process_progress(log, play):
-    """(Phase, Prozent 0..100) aus den Protokollen. Bahn = 0..55 %, Wolke = 55..98 %, fertig = 100 %."""
+    """(Phase, Prozent 0..100) aus den Protokollen. Bahn 0..55 %, Wolke 55..90 %, Glaetten 90..98 %, fertig 100 %."""
     phases = re.findall(r"^PHASE (\w+)", log, re.M)
     phase = phases[-1] if phases else "start"
     if phase == "bahn":
         m = re.findall(r"Duration: ([\d.]+) / ([\d.]+)", play)
         f = float(m[-1][0]) / float(m[-1][1]) if m and float(m[-1][1]) > 0 else 0.0
         return phase, round(55 * min(f, 1.0), 1)
-    if phase == "wolke":
-        m = re.findall(r"^FORTSCHRITT (\d+) (\d+)", log, re.M)
+    if phase in ("wolke", "glatt"):
+        teil = log.split("PHASE " + phase)[-1]                    # nur die FORTSCHRITT-Zeilen dieser Phase
+        m = re.findall(r"^FORTSCHRITT (\d+) (\d+)", teil, re.M)
         f = float(m[-1][0]) / float(m[-1][1]) if m and int(m[-1][1]) > 0 else 0.0
-        return phase, round(55 + 43 * min(f, 1.0), 1)
+        a, b = (55, 35) if phase == "wolke" else (90, 8)
+        return phase, round(a + b * min(f, 1.0), 1)
     return phase, (100.0 if phase == "fertig" else 0.0)
 
 
 assert process_progress("PHASE bahn\n", "\r [RUNNING]  Bag Time: 1.0   Duration: 50.000 / 200.000  \r") == ("bahn", 13.8)
-assert process_progress("PHASE bahn\nPHASE wolke\nFORTSCHRITT 100 200\n", "") == ("wolke", 76.5)
+assert process_progress("PHASE bahn\nPHASE wolke\nFORTSCHRITT 100 200\n", "") == ("wolke", 72.5)
+assert process_progress("PHASE wolke\nFORTSCHRITT 200 200\nPHASE glatt\n", "") == ("glatt", 90.0)
+assert process_progress("PHASE wolke\nFORTSCHRITT 200 200\nPHASE glatt\nFORTSCHRITT 2 4\n", "") == ("glatt", 94.0)
 assert process_progress("", "") == ("start", 0.0)
 
 
@@ -153,6 +157,7 @@ def api_process_status():
     log = _tail(PROCESS_LOG, 200000)
     phase, pct = process_progress(log, _tail(PLAY_LOG))
     ply = st["bag"][:-4] + "_1cm.ply"
+    glatt = st["bag"][:-4] + "_1cm_glatt.ply"
     done = not running and os.path.exists(os.path.join(BAGS_DIR, ply)) and phase == "fertig"
     elapsed = time.time() - st["t0"]
     eta = int(elapsed * (100 - pct) / pct) if running and pct > 3 else None
@@ -161,7 +166,7 @@ def api_process_status():
         err = "abgebrochen" if st.get("cancelled") else "Fehler: " + (log.strip().splitlines() or ["?"])[-1][-160:]
     return jsonify({"active": True, "running": running, "bag": st["bag"], "phase": phase, "pct": pct,
                     "elapsed_s": int(elapsed), "eta_s": eta, "done": done, "error": err,
-                    "file": ply if done else None})
+                    "file": (glatt if os.path.exists(os.path.join(BAGS_DIR, glatt)) else ply) if done else None})
 
 
 @app.route("/api/process/cancel", methods=["POST"])
@@ -179,7 +184,7 @@ def api_process_cancel():
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except Exception:
             pass
-    for p in glob.glob(os.path.join(BAGS_DIR, "*_1cm.ply.part")):
+    for p in glob.glob(os.path.join(BAGS_DIR, "*_1cm*.ply.part")):
         os.remove(p)
     return jsonify({"ok": True})
 
@@ -425,6 +430,7 @@ def get_bags():
         xyz_path  = os.path.join(BAGS_DIR, stem + ".xyz")
         hires_path = os.path.join(BAGS_DIR, stem + "_hires.xyz")
         ply_path   = os.path.join(BAGS_DIR, stem + "_1cm.ply")
+        glatt_path = os.path.join(BAGS_DIR, stem + "_1cm_glatt.ply")
         bags.append({
             "name":       base,
             "size_mb":    round(s.st_size / 1024.0 / 1024.0, 1),
@@ -434,6 +440,7 @@ def get_bags():
             "xyz_mb":     round(os.stat(xyz_path).st_size  / 1024.0 / 1024.0, 1) if os.path.exists(xyz_path)   else 0,
             "hires_mb":   round(os.stat(hires_path).st_size / 1024.0 / 1024.0, 1) if os.path.exists(hires_path) else 0,
             "has_ply":    os.path.exists(ply_path),
+            "has_glatt":  os.path.exists(glatt_path),
             "ply_mb":     round(os.stat(ply_path).st_size / 1024.0 / 1024.0, 1) if os.path.exists(ply_path) else 0,
         })
     return bags
@@ -791,6 +798,63 @@ def api_status():
     })
 
 
+vorschau_procs = {}   # Scan -> Popen (ply_vorschau.py)
+
+
+@app.route("/api/vorschau/<filename>")
+def api_vorschau(filename):
+    """3D-Vorschau eines fertigen Scans (4-cm-Wuerfel aus dem 1-cm-Modell). Erzeugt sie bei Bedarf."""
+    if "/" in filename or not filename.endswith(".bag"):
+        return jsonify({"ok": False, "msg": "Ungueltiger Name"})
+    stem = filename[:-4]
+    ply = os.path.join(BAGS_DIR, stem + "_1cm_glatt.ply")
+    if not os.path.exists(ply):
+        ply = os.path.join(BAGS_DIR, stem + "_1cm.ply")
+    if not os.path.exists(ply):
+        return jsonify({"ok": False, "msg": "Noch kein 1-cm-Modell – zuerst «1 cm» berechnen"})
+    out = os.path.join(WORK_DIR, stem + "_vorschau")
+    try:
+        with open(out + ".json") as f:
+            meta = json.load(f)
+        if os.path.getmtime(out + ".json") >= os.path.getmtime(ply) and meta.get("quelle") == os.path.basename(ply):
+            meta.update(ok=True, status="fertig")
+            return jsonify(meta)
+    except Exception:
+        pass
+    p = vorschau_procs.get(filename)
+    if p is None or p.poll() is not None:
+        if p is not None and p.returncode != 0:
+            vorschau_procs.pop(filename, None)
+            return jsonify({"ok": False, "msg": "Vorschau konnte nicht erstellt werden"})
+        os.makedirs(WORK_DIR, exist_ok=True)
+        vorschau_procs[filename] = subprocess.Popen(
+            ["python3", os.path.join(os.path.dirname(PROCESS_SCRIPT), "ply_vorschau.py"), ply, out],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return jsonify({"ok": True, "status": "laeuft"})
+
+
+@app.route("/api/vorschau/<filename>/bin")
+def api_vorschau_bin(filename):
+    if "/" in filename or not filename.endswith(".bag"):
+        return jsonify({"ok": False}), 400
+    path = os.path.join(WORK_DIR, filename[:-4] + "_vorschau.bin")
+    if not os.path.exists(path):
+        return jsonify({"ok": False}), 404
+    return send_file(path, mimetype="application/octet-stream")
+
+
+@app.route("/api/pose")
+def api_pose():
+    """Aktuelle Lage des Scanners (bridge.py -> /tmp/pose.json, 5 Hz)."""
+    try:
+        with open("/tmp/pose.json") as f:
+            resp = Response(f.read(), mimetype="application/json")
+    except Exception:
+        resp = jsonify({"session": 0, "pose": None})
+    resp.headers["Cache-Control"] = "no-cache, no-store"
+    return resp
+
+
 @app.route("/api/map_3d")
 def api_map_3d():
     """Bahn, Pose, Sitzung und Anzahl Wuerfel der 3D-Vorschau (bridge.py -> /tmp/map_3d.json)."""
@@ -971,8 +1035,10 @@ def api_delete_bag(filename):
         return jsonify({"ok": False, "msg": "Wird gerade berechnet – erst abbrechen"})
     os.remove(path)
     # zugehörige Dateien auch löschen (XYZ, 1-cm-Modell, Posen der Neuberechnung)
-    for extra in (path[:-4] + ".xyz", path[:-4] + "_1cm.ply",
-                  os.path.join(WORK_DIR, filename[:-4] + "_poses.bag")):
+    for extra in (path[:-4] + ".xyz", path[:-4] + "_1cm.ply", path[:-4] + "_1cm_glatt.ply",
+                  os.path.join(WORK_DIR, filename[:-4] + "_poses.bag"),
+                  os.path.join(WORK_DIR, filename[:-4] + "_vorschau.bin"),
+                  os.path.join(WORK_DIR, filename[:-4] + "_vorschau.json")):
         if os.path.exists(extra):
             os.remove(extra)
     return jsonify({"ok": True})
@@ -999,6 +1065,7 @@ def api_rename_bag(filename):
     os.rename(src, dst)
     # zugehörige Dateien mitumbenennen
     for a, b in ((src[:-4] + ".xyz", dst[:-4] + ".xyz"), (src[:-4] + "_1cm.ply", dst[:-4] + "_1cm.ply"),
+                 (src[:-4] + "_1cm_glatt.ply", dst[:-4] + "_1cm_glatt.ply"),
                  (os.path.join(WORK_DIR, filename[:-4] + "_poses.bag"), os.path.join(WORK_DIR, new_name[:-4] + "_poses.bag"))):
         if os.path.exists(a):
             os.rename(a, b)

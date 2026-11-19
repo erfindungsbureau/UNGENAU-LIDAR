@@ -2,7 +2,9 @@
   <!-- FAST-LIO2 offline: wie slam_fast_lio_sbg.launch, Eingang aus rosbag play; ident:=true setzt extrinsic_R = Einheit (gemessen 14.11.: SBG ~ Ouster bis 0.4 Grad) -->
   <arg name="ident" default="false"/>
   <arg name="est" default="true"/>
-  <arg name="pfn" default="3"/>  <!-- 3 fuer Bags in 1024x10, 6 fuer 2048x10 (ab 15.11.2026) -->
+  <arg name="pfn" default="3"/>
+  <!-- pfn: 3 fuer Bags in 1024x10, 6 fuer 2048x10 (ab 15.11.2026) -->
+  <arg name="blind" default="1.0"/>  <!-- Mindestdistanz; 0.5 hilft in engen Raeumen (Gen1 liefert ab ~0.5 m Echos, unter 0.8 m ungenauer) -->
   <rosparam command="load" file="/home/nvidia/UNGENAU-LIDAR/ros/config/fast_lio_sbg.yaml"/>
   <param name="common/lid_topic" value="/replay/points"/>
   <param name="common/imu_topic" value="/replay/imu"/>
@@ -10,6 +12,7 @@
   <param name="mapping/extrinsic_est_en" type="bool" value="$(arg est)"/>
   <param name="feature_extract_enable" type="bool"   value="0"/>
   <param name="point_filter_num"        type="int"    value="$(arg pfn)"/>
+  <param name="preprocess/blind"        type="double" value="$(arg blind)"/>
   <param name="max_iteration"           type="int"    value="3"/>
   <param name="filter_size_surf"        type="double" value="0.2"/>
   <param name="filter_size_map"         type="double" value="0.2"/>

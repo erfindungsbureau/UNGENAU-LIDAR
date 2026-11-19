@@ -92,15 +92,45 @@ acc = None; buf = []; n_raw = n_used = 0
 
 
 def reduce(parts):
+    """Puffer -> (sortierte Schluessel, Summen float32). Spaltenweise, damit nie n x 6 float64 entsteht."""
     K = np.concatenate([p[0] for p in parts]); V = np.concatenate([p[1] for p in parts])
     u, inv = np.unique(K, return_inverse=True)
-    S = np.stack([np.bincount(inv, V[:, j], len(u)).astype(np.float32) for j in range(V.shape[1])], 1)  # float32: TX2 hat nur 8 GB
+    del K
+    S = np.empty((len(u), V.shape[1]), np.float32)               # float32: TX2 hat nur 8 GB
+    for j in range(V.shape[1]):
+        S[:, j] = np.bincount(inv, V[:, j], len(u))
     return u, S
+
+
+def merge(acc, new):
+    """Neue Wuerfel in die sortierte Gesamtliste: vorhandene aufaddieren, fehlende einfuegen.
+    Frueher wurde alles zusammengehaengt und neu sortiert (~160 Byte/Wuerfel Spitze, OOM ab ~30 Mio.);
+    so sind es ~64 Byte/Wuerfel (alte + neue Liste beim Einfuegen)."""
+    if acc is None:
+        return new
+    ua, Sa = acc; un, Sn = new
+    i = np.searchsorted(ua, un)
+    ic = np.minimum(i, len(ua) - 1)
+    hit = ua[ic] == un
+    Sa[ic[hit]] += Sn[hit]
+    miss = ~hit
+    if miss.any():
+        ua = np.insert(ua, i[miss], un[miss])
+        Sa = np.insert(Sa, i[miss], Sn[miss], axis=0)
+    return ua, Sa
+
+
+_a = merge((np.array([2, 5, 9]), np.ones((3, 2), np.float32)), (np.array([1, 5, 7, 10]), np.full((4, 2), 2, np.float32)))
+assert _a[0].tolist() == [1, 2, 5, 7, 9, 10] and _a[1][:, 0].tolist() == [2, 1, 3, 2, 1, 2], _a
 
 
 with rosbag.Bag(bag_file) as b:
     n_frames = b.get_message_count('/ouster/points')
+    # BIS_S (Umgebung): nur die ersten BIS_S Sekunden, z.B. wenn die Bahn danach die Lage verloren hat
+    bis = float(os.environ['BIS_S']) + b.get_start_time() if os.environ.get('BIS_S') else None
     for k, (_, m, _) in enumerate(b.read_messages(topics=['/ouster/points'])):
+        if bis and m.header.stamp.to_sec() > bis:
+            break
         if k % 20 == 0:
             print('FORTSCHRITT %d %d' % (k, n_frames)); sys.stdout.flush()   # fuer den Balken im Web-UI
         assert m.point_step == 48 and not m.is_bigendian
@@ -120,10 +150,10 @@ with rosbag.Bag(bag_file) as b:
         V = np.column_stack([X, A['refl'][sel], A['amb'][sel], np.ones(len(X))]).astype(np.float32)
         buf.append((key, V))
         if sum(len(x[0]) for x in buf) > 6000000:
-            acc = reduce(buf + ([acc] if acc else [])); buf = []
+            acc = merge(acc, reduce(buf)); buf = []
             print('  Frame %d: %d Rohpunkte, %d verwendet, %d Wuerfel' % (k + 1, n_raw, n_used, len(acc[0])))
             sys.stdout.flush()
-    if buf: acc = reduce(buf + ([acc] if acc else []))
+    if buf: acc = merge(acc, reduce(buf))
 
 u, S = acc; cnt = S[:, 5]
 if out.endswith('.ply'):

@@ -1,0 +1,58 @@
+--- a/src/laserMapping.cpp
++++ b/src/laserMapping.cpp
+@@ -45,6 +45,7 @@
+ #include <Eigen/Core>
+ #include "IMU_Processing.hpp"
+ #include <nav_msgs/Odometry.h>
++#include <std_msgs/Float64MultiArray.h>   // UNGENAU: /fastlio/quality
+ #include <nav_msgs/Path.h>
+ #include <visualization_msgs/Marker.h>
+ #include <pcl_conversions/pcl_conversions.h>
+@@ -85,6 +86,7 @@
+ string map_file_path, lid_topic, imu_topic;
+ 
+ double res_mean_last = 0.05, total_residual = 0.0;
++double degen_t = 0.0;   // UNGENAU: Bestimmtheit der Verschiebung (0 = eine Richtung frei, hoechstens 1/3)
+ double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
+ double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
+ double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
+@@ -713,6 +715,16 @@
+     }
+ 
+     res_mean_last = total_residual / effct_feat_num;
++    {   // UNGENAU: kleinster Eigenwert von mittel(n n^T) ueber die Flaechennormalen der Treffer.
++        // Klein = alle Flaechen zeigen fast gleich (Gang, nahe Wand) -> Verschiebung entlang einer Richtung unbestimmt
++        M3D Nn = M3D::Zero();
++        for (int i = 0; i < effct_feat_num; i++)
++        {
++            V3D n(corr_normvect->points[i].x, corr_normvect->points[i].y, corr_normvect->points[i].z);
++            Nn += n * n.transpose();
++        }
++        degen_t = Eigen::SelfAdjointEigenSolver<M3D>(Nn / effct_feat_num).eigenvalues()(0);
++    }
+     match_time  += omp_get_wtime() - match_start;
+     double solve_start_  = omp_get_wtime();
+     
+@@ -859,6 +871,9 @@
+             ("/Odometry", 100000);
+     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
+             ("/path", 100000);
++    // UNGENAU: Matching-Qualitaet pro Scan fuer die Live-Warnung im Web-UI
++    ros::Publisher pubQuality       = nh.advertise<std_msgs::Float64MultiArray>
++            ("/fastlio/quality", 100);
+ //------------------------------------------------------------------------------------------------------
+     signal(SIGINT, SigHandle);
+     ros::Rate rate(5000);
+@@ -971,6 +986,12 @@
+ 
+             /******* Publish odometry *******/
+             publish_odometry(pubOdomAftMapped);
++            {   // UNGENAU: [Scan-Ende (s), Punkte nach Vorfilter, nach Ausduennung, Treffer, mittl. Restfehler (m), degen_t]
++                std_msgs::Float64MultiArray q;
++                q.data = {lidar_end_time, (double)feats_undistort->points.size(), (double)feats_down_size,
++                          (double)effct_feat_num, res_mean_last, degen_t};
++                pubQuality.publish(q);
++            }
+ 
+             /*** add the feature points to map kdtree ***/
+             t3 = omp_get_wtime();
